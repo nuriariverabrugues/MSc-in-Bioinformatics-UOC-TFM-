@@ -1,0 +1,94 @@
+---
+title: "Untitled"
+author: "Núria Rivera Brugués"
+date: "2023-11-14"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE)
+```
+
+```{r}
+library(data.table)
+library(Seurat)
+library(sp)
+library(Matrix)
+library(SeuratObject)
+library(patchwork)
+library(dplyr)
+library(tidyverse)
+library(ggplot2) # plots
+library(magrittr) # %>% operator
+library(reticulate) # required for "leiden" clustering
+library(enrichR) # functional enrichment
+library(future) # multicore support for Seurat
+library(cowplot)
+library(SingleCellExperiment)
+library(readr)
+```
+
+
+# Finding differentially expressed features (cluster biomarkers)
+
+
+```{r}
+kidney.integrated <- readRDS("kidney.integrated.rds")
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+kidney.integrated.markers <- FindAllMarkers(kidney.integrated, only.pos = F, min.pct = 0.25, logfc.threshold = 0.25)
+
+kidney.integrated.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC)
+```
+
+
+```{r}
+write.csv2(kidney.integrated.markers, "kidney.integrated.markers.csv")
+```
+
+```{r}
+clusterCell.markers <- FindMarkers(kidney.integrated, ident.1 = "sCellDropseq", logfc.threshold = 0.25, test.use = "roc", only.pos = FALSE)
+head(clusterCell.markers, n = 5)
+```
+
+```{r}
+clusterNuc.markers <- FindMarkers(kidney.integrated, ident.1 = "sNucDropseq", logfc.threshold = 0.25, test.use = "roc", only.pos = FALSE)
+head(clusterNuc.markers, n = 5)
+```
+
+```{r}
+VlnPlot(kidney.integrated, features = c("Brca1", "Maoa"))
+```
+
+
+```{r}
+# you can plot raw counts as well
+VlnPlot(kidney.integrated, features = c("Fut2", "Malat1"),  log = TRUE)
+```
+
+
+```{r}
+FeaturePlot(kidney.integrated, features = c("Malat1", "Brca1", "Fut2", "Maoa"))
+```
+
+
+```{r}
+top10 <- kidney.integrated.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+
+pdf(paste("heatmap_clusters.pdf",sep=""))
+DoHeatmap(kidney.integrated, features = top10$gene) 
+dev.off()
+DoHeatmap(kidney.integrated, features = top10$gene) 
+```
+
+```{r}
+markers <- FindMarkers(kidney.integrated, ident.1 = "sCellDropseq", ident.2 = "sNucDropseq", verbose = FALSE, assay = "integrated", slot = "scale.data", min.pct = 0.25, test.use = "wilcox", logfc.threshold = 0.25)
+markers <- markers %>%  arrange(avg_diff)
+#p_data <-   top  %>% filter(adj.P.Val <0.01 & abs(logFC) > 2.5)  
+head(markers, n = 25)
+```
+
+
+
+

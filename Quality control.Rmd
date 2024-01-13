@@ -1,0 +1,2043 @@
+---
+title: "Quality Control"
+author: "Núria Rivera Brugués"
+date: "2023-12-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(limma)
+library(edgeR)
+library(sva)
+library(pheatmap)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(factoextra)
+library(FactoMineR)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+library(enrichplot)
+library(tidyr)
+library(ggplot2)
+library(dplyr)
+```
+
+
+
+##### Quality Control #######################
+#############################################
+
+```{r , warning=FALSE}
+counts <- read.csv("/home/nrb/Documentos/counts/counts2_reduced_ANNA.csv", row.names = 1, header=T, sep=",")
+colname<-colnames(counts)
+counts2 <- read_delim("/home/nrb/Documentos/R/dades/bulk1/rsem.merged.gene_counts.tsv")
+counts2<-as.data.frame(counts2)
+rownames(counts2)<-counts2$gene_id
+counts<-counts2[,colname]
+
+info <- read.delim("/home/nrb/Documentos/counts_RSEM/targets.csv", sep=",")
+colnames(counts)<-info[,14]
+rownames(info)<-info$Sample
+barcode=factor(info$Sample)
+subsample=factor(info$Subgroup)
+group=factor(info$Group)
+time=factor(info$Time)
+```
+
+Subcellular RNA fractions have a different transcript composition.Scatter plot and correlation matrix of all sequenced samples.
+The color intensity of the correlation boxes (r values) depicts the relative strength of the correlation, ranging between 0.39 and 0.97. 
+
+(B) RNA species content of each sequenced fraction in counts per million. CPM, counts per million; lincRNA, long intergenic noncoding RNA; snoRNA, small nucleolar RNA; snRNA, small nuclear RNA
+
+
+```{r}
+biotypes<- read_delim("/home/nrb/Documentos/R/dades/bulk1/star_rsem/GSE182856_multiqc_report_data/multiqc_featurecounts_biotype_plot.txt")
+biotypes<-as.data.frame(biotypes)
+biotypes<-biotypes[-c(1:36, 61:120),]
+genomic_origin<- read_delim("/home/nrb/Documentos/R/dades/bulk1/star_rsem/GSE182856_multiqc_report_data/mqc_qualimap_genomic_origin_1.txt")
+genomic_origin<- as.data.frame(genomic_origin)
+genomic_origin<-genomic_origin[-c(1:36, 61:120),]
+
+merge_origin<-merge(x=info, y=genomic_origin, by.x = "Run", by.y = "Sample")
+merge_origin<-merge_origin[,-c(2:11)]
+
+merge_biotypes<-merge(x=info, y=biotypes, by.x = "Run", by.y = "Sample")
+merge_biotypes<-merge_biotypes[,-c(2:11)]
+```
+
+# Distribució segons genomic origin
+
+```{r}
+names(merge_origin)
+merge_origin_long <- gather(merge_origin, Category, Fraction, Exonic, Intronic, Intergenic)
+
+merge_origin_long <- merge_origin_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_origin_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+
+# Crear un gráfico de barras apiladas con colores diferentes para cada categoría
+ggplot(merge_origin_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Fraction") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+```
+
+```{r}
+# Crear una lista de data frames, uno por cada grupo (Cytoplasmic y Nuclear)
+groups <- split(merge_origin_long, merge_origin_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/exonic_liver.csv")
+
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 40),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 40)  ) 
+pdf(paste("Grafic1.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 40),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 40)  )   # Tamaño del título de la leyenda
+dev.off()
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_Fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/exonic_liver2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal()
+```
+
+# Distribució sengons sengons biotypes (protein_coding vs non_protein_coding (la resta))
+
+```{r}
+merge_biotypes$non_protein_coding <- rowSums(merge_biotypes[, c(7:8, 10:43)], na.rm = TRUE)
+merge_biotypes_long_simple<- gather(merge_biotypes, Category, Fraction,  protein_coding ,non_protein_coding)
+merge_biotypes_long_simple <- merge_biotypes_long_simple %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_biotypes_long_simple, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+
+# Crear un gráfico de barras apiladas con colores diferentes para cada categoría
+ggplot(merge_biotypes_long_simple, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Fraction") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+```
+
+```{r}
+groups <- split(merge_biotypes_long_simple, merge_biotypes_long_simple$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/protein_liver.csv")
+
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Media de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal()
+
+pdf(paste("Grafic2.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Media de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal()
+dev.off()
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/protein_liver2.csv")
+
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal()
+```
+# Distribució sengons biotypes (protein_coding exclós)
+
+```{r}
+
+merge_biotypes_long <- gather(merge_biotypes, Category, Fraction, TEC , snRNA, processed_pseudogene ,lncRNA ,miRNA,snoRNA ,misc_RNA,transcribed_unprocessed_pseudogene,unprocessed_pseudogene,rRNA,  transcribed_processed_pseudogene,ribozyme,unitary_pseudogene,scaRNA,pseudogene,transcribed_unitary_pseudogene,translated_unprocessed_pseudogene,TR_V_gene,TR_V_pseudogene,TR_D_gene,TR_J_gene,TR_J_pseudogene,IG_LV_gene,IG_V_gene,IG_V_pseudogene ,IG_J_gene,  IG_C_gene,  sRNA, scRNA , IG_C_pseudogene,IG_D_gene, IG_D_pseudogene, IG_pseudogene, Mt_tRNA,  Mt_rRNA )
+
+# protein_coding 
+merge_biotypes_long <- merge_biotypes_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+```
+
+
+```{r}
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_biotypes_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "protein_coding" = "#0FBBF0",
+    "TEC" = "#0000FF",  # Azul
+    "snRNA" = "#008000",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "lncRNA" = "#FFA500",  # Naranja
+    "miRNA" = "#FFC0CB",  # Rosa
+    "snoRNA" = "#A52A2A",  # Marrón
+    "misc_RNA" = "#808080",  # Gris
+    "transcribed_unprocessed_pseudogene" = "#ADD8E6",  # Azul claro
+    "unprocessed_pseudogene" = "#90EE90",  # Verde claro
+    "rRNA" = "#00008B",  # Azul oscuro
+    "transcribed_processed_pseudogene" = "#006400",  # Verde oscuro
+    "ribozyme" = "#8B0000",  # Rojo oscuro
+    "unitary_pseudogene" = "#DAA520",  # Amarillo
+    "scaRNA" = "#2E8B57",  # Verde marino
+    "pseudogene" = "#FF69B4",  # Rosa claro
+    "transcribed_unitary_pseudogene" = "#D2B48C",  # Marrón claro
+    "translated_unprocessed_pseudogene" = "#D3D3D3",  # Gris claro
+    "TR_V_gene" = "#0000FF",
+    "TR_V_pseudogene" = "#008000",
+    "TR_D_gene" = "#FF0000",
+    "TR_J_gene" = "#800080",
+    "TR_J_pseudogene" = "#FFA500",
+    "IG_LV_gene" = "#FFC0CB",
+    "IG_V_gene" = "#A52A2A",
+    "IG_V_pseudogene" = "#808080",
+    "IG_J_gene" = "#ADD8E6",
+    "IG_C_gene" = "#90EE90",
+    "sRNA" = "#00008B",
+    "scRNA" = "#006400",
+    "IG_C_pseudogene" = "#8B0000",
+    "IG_D_gene" = "#DAA520",
+    "IG_D_pseudogene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "Mt_tRNA" = "#D2B48C",
+    "Mt_rRNA" = "#D3D3D3"
+  )) +
+ theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_biotypes_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "protein_coding" = "#0FBBF0",
+    "TEC" = "#0000FF",  # Azul
+    "snRNA" = "#008000",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "lncRNA" = "#FFA500",  # Naranja
+    "miRNA" = "#FFC0CB",  # Rosa
+    "snoRNA" = "#A52A2A",  # Marrón
+    "misc_RNA" = "#808080",  # Gris
+    "transcribed_unprocessed_pseudogene" = "#ADD8E6",  # Azul claro
+    "unprocessed_pseudogene" = "#90EE90",  # Verde claro
+    "rRNA" = "#00008B",  # Azul oscuro
+    "transcribed_processed_pseudogene" = "#006400",  # Verde oscuro
+    "ribozyme" = "#8B0000",  # Rojo oscuro
+    "unitary_pseudogene" = "#DAA520",  # Amarillo
+    "scaRNA" = "#2E8B57",  # Verde marino
+    "pseudogene" = "#FF69B4",  # Rosa claro
+    "transcribed_unitary_pseudogene" = "#D2B48C",  # Marrón claro
+    "translated_unprocessed_pseudogene" = "#D3D3D3",  # Gris claro
+    "TR_V_gene" = "#0000FF",
+    "TR_V_pseudogene" = "#008000",
+    "TR_D_gene" = "#FF0000",
+    "TR_J_gene" = "#800080",
+    "TR_J_pseudogene" = "#FFA500",
+    "IG_LV_gene" = "#FFC0CB",
+    "IG_V_gene" = "#A52A2A",
+    "IG_V_pseudogene" = "#808080",
+    "IG_J_gene" = "#ADD8E6",
+    "IG_C_gene" = "#90EE90",
+    "sRNA" = "#00008B",
+    "scRNA" = "#006400",
+    "IG_C_pseudogene" = "#8B0000",
+    "IG_D_gene" = "#DAA520",
+    "IG_D_pseudogene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "Mt_tRNA" = "#D2B48C",
+    "Mt_rRNA" = "#D3D3D3"
+  )) +
+ theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+
+
+```
+
+
+```{r}
+# Crear una lista de data frames, uno por cada grupo (Cytoplasmic y Nuclear)
+groups <- split(merge_biotypes_long, merge_biotypes_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/biotypes_liver.csv")
+
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "protein_coding" = "#0FBBF0",
+    "TEC" = "#0000FF",  # Azul
+    "snRNA" = "#008000",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "lncRNA" = "#FFA500",  # Naranja
+    "miRNA" = "#FFC0CB",  # Rosa
+    "snoRNA" = "#A52A2A",  # Marrón
+    "misc_RNA" = "#808080",  # Gris
+    "transcribed_unprocessed_pseudogene" = "#ADD8E6",  # Azul claro
+    "unprocessed_pseudogene" = "#90EE90",  # Verde claro
+    "rRNA" = "#00008B",  # Azul oscuro
+    "transcribed_processed_pseudogene" = "#006400",  # Verde oscuro
+    "ribozyme" = "#8B0000",  # Rojo oscuro
+    "unitary_pseudogene" = "#DAA520",  # Amarillo
+    "scaRNA" = "#2E8B57",  # Verde marino
+    "pseudogene" = "#FF69B4",  # Rosa claro
+    "transcribed_unitary_pseudogene" = "#D2B48C",  # Marrón claro
+    "translated_unprocessed_pseudogene" = "#D3D3D3",  # Gris claro
+    "TR_V_gene" = "#0000FF",
+    "TR_V_pseudogene" = "#008000",
+    "TR_D_gene" = "#FF0000",
+    "TR_J_gene" = "#800080",
+    "TR_J_pseudogene" = "#FFA500",
+    "IG_LV_gene" = "#FFC0CB",
+    "IG_V_gene" = "#A52A2A",
+    "IG_V_pseudogene" = "#808080",
+    "IG_J_gene" = "#ADD8E6",
+    "IG_C_gene" = "#90EE90",
+    "sRNA" = "#00008B",
+    "scRNA" = "#006400",
+    "IG_C_pseudogene" = "#8B0000",
+    "IG_D_gene" = "#DAA520",
+    "IG_D_pseudogene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "Mt_tRNA" = "#D2B48C",
+    "Mt_rRNA" = "#D3D3D3"
+  )) +
+  theme_minimal()
+
+pdf(paste("Grafic3.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "protein_coding" = "#0FBBF0",
+    "TEC" = "#0000FF",  # Azul
+    "snRNA" = "#008000",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "lncRNA" = "#FFA500",  # Naranja
+    "miRNA" = "#FFC0CB",  # Rosa
+    "snoRNA" = "#A52A2A",  # Marrón
+    "misc_RNA" = "#808080",  # Gris
+    "transcribed_unprocessed_pseudogene" = "#ADD8E6",  # Azul claro
+    "unprocessed_pseudogene" = "#90EE90",  # Verde claro
+    "rRNA" = "#00008B",  # Azul oscuro
+    "transcribed_processed_pseudogene" = "#006400",  # Verde oscuro
+    "ribozyme" = "#8B0000",  # Rojo oscuro
+    "unitary_pseudogene" = "#DAA520",  # Amarillo
+    "scaRNA" = "#2E8B57",  # Verde marino
+    "pseudogene" = "#FF69B4",  # Rosa claro
+    "transcribed_unitary_pseudogene" = "#D2B48C",  # Marrón claro
+    "translated_unprocessed_pseudogene" = "#D3D3D3",  # Gris claro
+    "TR_V_gene" = "#0000FF",
+    "TR_V_pseudogene" = "#008000",
+    "TR_D_gene" = "#FF0000",
+    "TR_J_gene" = "#800080",
+    "TR_J_pseudogene" = "#FFA500",
+    "IG_LV_gene" = "#FFC0CB",
+    "IG_V_gene" = "#A52A2A",
+    "IG_V_pseudogene" = "#808080",
+    "IG_J_gene" = "#ADD8E6",
+    "IG_C_gene" = "#90EE90",
+    "sRNA" = "#00008B",
+    "scRNA" = "#006400",
+    "IG_C_pseudogene" = "#8B0000",
+    "IG_D_gene" = "#DAA520",
+    "IG_D_pseudogene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "Mt_tRNA" = "#D2B48C",
+    "Mt_rRNA" = "#D3D3D3"
+  )) +
+  theme_minimal()
+dev.off()
+
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/biotypes_liver2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "protein_coding" = "#0FBBF0",
+    "TEC" = "#0000FF",  # Azul
+    "snRNA" = "#008000",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "lncRNA" = "#FFA500",  # Naranja
+    "miRNA" = "#FFC0CB",  # Rosa
+    "snoRNA" = "#A52A2A",  # Marrón
+    "misc_RNA" = "#808080",  # Gris
+    "transcribed_unprocessed_pseudogene" = "#ADD8E6",  # Azul claro
+    "unprocessed_pseudogene" = "#90EE90",  # Verde claro
+    "rRNA" = "#00008B",  # Azul oscuro
+    "transcribed_processed_pseudogene" = "#006400",  # Verde oscuro
+    "ribozyme" = "#8B0000",  # Rojo oscuro
+    "unitary_pseudogene" = "#DAA520",  # Amarillo
+    "scaRNA" = "#2E8B57",  # Verde marino
+    "pseudogene" = "#FF69B4",  # Rosa claro
+    "transcribed_unitary_pseudogene" = "#D2B48C",  # Marrón claro
+    "translated_unprocessed_pseudogene" = "#D3D3D3",  # Gris claro
+    "TR_V_gene" = "#0000FF",
+    "TR_V_pseudogene" = "#008000",
+    "TR_D_gene" = "#FF0000",
+    "TR_J_gene" = "#800080",
+    "TR_J_pseudogene" = "#FFA500",
+    "IG_LV_gene" = "#FFC0CB",
+    "IG_V_gene" = "#A52A2A",
+    "IG_V_pseudogene" = "#808080",
+    "IG_J_gene" = "#ADD8E6",
+    "IG_C_gene" = "#90EE90",
+    "sRNA" = "#00008B",
+    "scRNA" = "#006400",
+    "IG_C_pseudogene" = "#8B0000",
+    "IG_D_gene" = "#DAA520",
+    "IG_D_pseudogene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "Mt_tRNA" = "#D2B48C",
+    "Mt_rRNA" = "#D3D3D3"
+  ))  +
+  theme_minimal()
+```
+
+# Distribusció segons aligment
+
+```{r}
+genomic_assigment<- read_delim("/home/nrb/Documentos/R/dades/bulk1/star_rsem/GSE182856_multiqc_report_data/mqc_rsem_assignment_plot_1.txt")
+genomic_assigment<- as.data.frame(genomic_assigment)
+genomic_assigment<-genomic_assigment[-c(1:36, 61:120),]
+
+merge_assigment<-merge(x=info, y=genomic_assigment, by.x = "Run", by.y = "Sample")
+merge_assigment<-merge_assigment[,-c(2:11)]
+```
+
+```{r}
+genomic_assigment_long  <- gather(merge_assigment, Category, Fraction, "Aligned uniquely to a gene", "Aligned to multiple genes", "Filtered due to too many alignments", "Unalignable reads")
+
+genomic_assigment_long <- genomic_assigment_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(genomic_assigment_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+
+
+
+  
+  # Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(genomic_assigment_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +# Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+```
+
+```{r}
+groups <- split(genomic_assigment_long, genomic_assigment_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/mapping_liver.csv")
+
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB"))+
+  theme_minimal() + 
+  theme(
+    legend.text = element_text(size = 18),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 20)     # Tamaño del título de la leyenda
+  )
+
+pdf(paste("Grafic4.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB"))+
+  theme_minimal() + 
+  theme(
+    legend.text = element_text(size = 18),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 20)     # Tamaño del título de la leyenda
+  )
+dev.off()
+
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/mapping_liver2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB"))+
+  theme_minimal()
+```
+
+# Distribució segons SortmeRNA
+
+```{r}
+genomic_sortmerna<- read_delim("/home/nrb/Documentos/R/dades/bulk1/star_rsem/GSE182856_multiqc_report_data/mqc_sortmerna-detailed-plot_1.txt")
+genomic_sortmerna<- as.data.frame(genomic_sortmerna)
+genomic_sortmerna<-genomic_sortmerna[-c(1:36, 61:120),]
+
+merge_sortmerna<-merge(x=info, y=genomic_sortmerna, by.x = "Run", by.y = "Sample")
+merge_sortmerna<-merge_sortmerna[,-c(2:11)]
+```
+
+
+```{r}
+
+genomic_sortmerna_long  <- gather(merge_sortmerna, Category, Fraction, "rfam-5.8s-database-id98_count" ,"rfam-5s-database-id98_count" ,  "silva-arc-16s-id95_count"  ,    "silva-arc-23s-id98_count"  ,    "silva-bac-16s-id90_count"  ,    "silva-bac-23s-id98_count"   ,   "silva-euk-18s-id95_count"   ,   "silva-euk-28s-id98_count"  )
+
+genomic_sortmerna_long <- genomic_sortmerna_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+ggplot(genomic_sortmerna_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+
+
+
+
+ggplot(genomic_sortmerna_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+ facet_grid(. ~ Group) +# Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+```
+```{r}
+groups <- split(genomic_sortmerna_long, genomic_sortmerna_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/sortme_liver.csv")
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Media de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal()
+
+pdf(paste("Grafic5.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Media de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal()
+dev.off()
+
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/sortme_liver2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal()
+```
+
+
+
+##### KIDNEY ################3333
+#####################################3
+```{r}
+counts_kidney_human<-read.delim("/home/nrb/Documentos/R/dades/bulk2/rsem.merged.gene_counts.tsv")
+rownames(counts_kidney_human)<-counts_kidney_human[,1]
+counts_kidney_human<-counts_kidney_human[,-1:-2]
+
+colnames(counts_kidney_human)<-c("N1", "N2", "C1", "C2")
+
+targets_kidney_human<-read.delim("/home/nrb/Documentos/R/kidney/SraRunTable_kidney.txt", header=T, sep=",")
+targets_kidney_human<-targets_kidney_human[,c(1,6,8,15,27,28,29)]
+info<-targets_kidney_human
+info$Sample<-c("N1", "N2", "C1", "C2")
+info$Fraction<-c("Nuclear", "Nuclear", "Cytoplasmic", "Cytoplasmic")
+info$Group<-c("Nuc", "Nuc", "Cyt", "Cyt")
+info<-info[c(3,4,1,2),]
+write.csv(info, "/home/nrb/Documentos/R/kidney/info_kidney.csv")
+
+# redueixo el dataframe (nomes Cyt vs Nuc del neurones corticals primaries)
+info$Subgroup<-c(1,2,1,2)
+rownames(info)<-info$Sample
+barcode=factor(info$Sample)
+subgroup=factor(info$Subgroup)
+group=factor(info$Group)
+fraction<-factor(info$Fraction)
+
+```
+
+###### QUALITY CONTROL ###############################
+######################################################
+
+
+```{r}
+biotypes<- read_delim("/home/nrb/Documentos/R/dades/bulk2/star_rsem/GSM3207009_multiqc_report_data/multiqc_featurecounts_biotype_plot.txt")
+biotypes<-as.data.frame(biotypes)
+
+genomic_origin<- read_delim("/home/nrb/Documentos/R/dades/bulk2/star_rsem/GSM3207009_multiqc_report_data//mqc_qualimap_genomic_origin_1.txt")
+genomic_origin<- as.data.frame(genomic_origin)
+
+
+merge_origin<-merge(x=info, y=genomic_origin, by.x = "Run", by.y = "Sample")
+merge_origin<-merge_origin[,-c(2:7)]
+
+
+merge_biotypes<-merge(x=info, y=biotypes, by.x = "Run", by.y = "Sample")
+merge_biotypes<-merge_biotypes[,-c(2:7)]
+
+```
+
+# Distribució segons genomic origin
+
+```{r}
+merge_origin_long <- gather(merge_origin, Category, Fraction, Exonic, Intronic, Intergenic)
+
+merge_origin_long <- merge_origin_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_origin_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+
+# Crear un gráfico de barras apiladas con colores diferentes para cada categoría
+ggplot(merge_origin_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Fraction") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+```
+
+```{r}
+# Crear una lista de data frames, uno por cada grupo (Cytoplasmic y Nuclear)
+groups <- split(merge_origin_long, merge_origin_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/exonic_kidney.csv")
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 20),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 20)  )   # Tamaño del título de la leyenda
+
+
+pdf(paste("Grafic1.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 20),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 20)  )   # Tamaño del título de la leyenda
+dev.off()
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_Fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/exonic_kidney2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Exonic" = "blue", "Intronic" = "green", "Intergenic" = "orange")) +
+  theme_minimal()
+```
+
+# Distribució sengons sengons biotypes (protein_coding vs non_protein_coding (la resta))
+
+```{r}
+merge_biotypes$non_protein_coding <- rowSums(merge_biotypes[, c(5:8, 10:43)], na.rm = TRUE)
+merge_biotypes_long_simple<- gather(merge_biotypes, Category, Fraction,  protein_coding ,non_protein_coding)
+merge_biotypes_long_simple <- merge_biotypes_long_simple %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_biotypes_long_simple, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+
+# Crear un gráfico de barras apiladas con colores diferentes para cada categoría
+ggplot(merge_biotypes_long_simple, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Fraction") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+```
+
+```{r}
+groups <- split(merge_biotypes_long_simple, merge_biotypes_long_simple$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/protein_kidney.csv")
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Media de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal()
+
+pdf(paste("Grafic2.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Media de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal()
+dev.off()
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/protein_kidney2.csv")
+
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("protein_coding" = "#FF0000", "non_protein_coding" = "green")) +
+  theme_minimal()
+```
+
+
+
+# Distribució sengons biotypes (protein_coding exclós)
+
+```{r}
+names(merge_biotypes)
+merge_biotypes_long <- gather(merge_biotypes, Category, Fraction, "lncRNA", "transcribed_unprocessed_pseudogene", "unprocessed_pseudogene" , "miRNA", "processed_pseudogene"  , "snRNA" ,"transcribed_processed_pseudogene" , "misc_RNA" , "TEC" , "transcribed_unitary_pseudogene"  ,   "snoRNA" , "scaRNA", "rRNA_pseudogene" , "unitary_pseudogene" , "pseudogene", "rRNA","IG_V_pseudogene", "scRNA", "IG_V_gene",  "IG_C_gene", "IG_J_gene" , "sRNA" , "ribozyme"  , "translated_processed_pseudogene", "vault_RNA" , "TR_C_gene", "TR_J_gene", "TR_V_gene", "TR_V_pseudogene" , "TR_D_gene", "IG_C_pseudogene" , "TR_J_pseudogene" , "IG_J_pseudogene" , "IG_D_gene" , "IG_pseudogene" , "artifact", "Mt_tRNA" , "Mt_rRNA" )
+
+      
+
+# protein_coding 
+merge_biotypes_long <- merge_biotypes_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+```
+
+
+```{r}
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_biotypes_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "lncRNA" = "#FFA500",
+    "transcribed_unprocessed_pseudogene" = "#808080",  # Azul
+    "unprocessed_pseudogene" = "#90EE90",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "snRNA" = "#0FBBF0",  # Naranja
+    "transcribed_processed_pseudogene" = "#FFC0CB",  # Rosa
+    "misc_RNA" = "#A52A2A",  # Marrón
+    "TEC" = "#0000FF",  # Gris
+    "transcribed_unitary_pseudogene" = "#ADD8E6",  # Azul claro
+    "snoRNA" = "#008000",  # Verde claro
+    "scaRNA" = "#00008B",  # Azul oscuro
+    "rRNA_pseudogene" = "#006400",  # Verde oscuro
+    "unitary_pseudogene" = "#8B0000",  # Rojo oscuro
+    "pseudogene" = "#DAA520",  # Amarillo
+    "rRNA" = "#2E8B57",  # Verde marino
+    "IG_V_pseudogene" = "#FF69B4",  # Rosa claro
+    "scRNA" = "#D2B48C",  # Marrón claro
+    "IG_V_gene" = "#D3D3D3",  # Gris claro
+    "IG_C_gene" = "#0000FF",
+    "IG_J_gene" = "#008000",
+    "sRNA" = "#FF0000",
+    "ribozyme" = "#800080",
+    "translated_processed_pseudogene" = "#FFA500",
+    "vault_RNA" = "#FFC0CB",
+    "TR_C_gene" = "#A52A2A",
+    "TR_J_gene" = "#808080",
+    "TR_V_gene" = "#ADD8E6",
+    "TR_V_pseudogene" = "#90EE90",
+    "TR_D_gene" = "#00008B",
+    "IG_C_pseudogene" = "#006400",
+    "TR_J_pseudogene" = "#8B0000",
+    "IG_J_pseudogene" = "#DAA520",
+    "IG_D_gene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "artifact" = "#D2B48C",
+    "Mt_tRNA" = "#D5B5D3",
+    "Mt_rRNA" = "#D3D3D3"
+  
+  )) +
+ theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.2))  # Centrar el título de la leyenda
+
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_biotypes_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = 
+                      c(
+    "lncRNA" = "#FFA500",
+    "transcribed_unprocessed_pseudogene" = "#808080",  # Azul
+    "unprocessed_pseudogene" = "#90EE90",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "snRNA" = "#0FBBF0",  # Naranja
+    "transcribed_processed_pseudogene" = "#FFC0CB",  # Rosa
+    "misc_RNA" = "#A52A2A",  # Marrón
+    "TEC" = "#0000FF",  # Gris
+    "transcribed_unitary_pseudogene" = "#ADD8E6",  # Azul claro
+    "snoRNA" = "#008000",  # Verde claro
+    "scaRNA" = "#00008B",  # Azul oscuro
+    "rRNA_pseudogene" = "#006400",  # Verde oscuro
+    "unitary_pseudogene" = "#8B0000",  # Rojo oscuro
+    "pseudogene" = "#DAA520",  # Amarillo
+    "rRNA" = "#2E8B57",  # Verde marino
+    "IG_V_pseudogene" = "#FF69B4",  # Rosa claro
+    "scRNA" = "#D2B48C",  # Marrón claro
+    "IG_V_gene" = "#D3D3D3",  # Gris claro
+    "IG_C_gene" = "#0000FF",
+    "IG_J_gene" = "#008000",
+    "sRNA" = "#FF0000",
+    "ribozyme" = "#800080",
+    "translated_processed_pseudogene" = "#FFA500",
+    "vault_RNA" = "#FFC0CB",
+    "TR_C_gene" = "#A52A2A",
+    "TR_J_gene" = "#808080",
+    "TR_V_gene" = "#ADD8E6",
+    "TR_V_pseudogene" = "#90EE90",
+    "TR_D_gene" = "#00008B",
+    "IG_C_pseudogene" = "#006400",
+    "TR_J_pseudogene" = "#8B0000",
+    "IG_J_pseudogene" = "#DAA520",
+    "IG_D_gene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "artifact" = "#D2B48C",
+    "Mt_tRNA" = "#D5B5D3",
+    "Mt_rRNA" = "#D3D3D3"
+  )) +
+ theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+
+
+```
+
+
+```{r}
+# Crear una lista de data frames, uno por cada grupo (Cytoplasmic y Nuclear)
+groups <- split(merge_biotypes_long, merge_biotypes_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/biotypes_kidney.csv")
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "lncRNA" = "#FFA500",
+    "transcribed_unprocessed_pseudogene" = "#808080",  # Azul
+    "unprocessed_pseudogene" = "#90EE90",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "snRNA" = "#0FBBF0",  # Naranja
+    "transcribed_processed_pseudogene" = "#FFC0CB",  # Rosa
+    "misc_RNA" = "#A52A2A",  # Marrón
+    "TEC" = "#0000FF",  # Gris
+    "transcribed_unitary_pseudogene" = "#ADD8E6",  # Azul claro
+    "snoRNA" = "#008000",  # Verde claro
+    "scaRNA" = "#00008B",  # Azul oscuro
+    "rRNA_pseudogene" = "#006400",  # Verde oscuro
+    "unitary_pseudogene" = "#8B0000",  # Rojo oscuro
+    "pseudogene" = "#DAA520",  # Amarillo
+    "rRNA" = "#2E8B57",  # Verde marino
+    "IG_V_pseudogene" = "#FF69B4",  # Rosa claro
+    "scRNA" = "#D2B48C",  # Marrón claro
+    "IG_V_gene" = "#D3D3D3",  # Gris claro
+    "IG_C_gene" = "#0000FF",
+    "IG_J_gene" = "#008000",
+    "sRNA" = "#FF0000",
+    "ribozyme" = "#800080",
+    "translated_processed_pseudogene" = "#FFA500",
+    "vault_RNA" = "#FFC0CB",
+    "TR_C_gene" = "#A52A2A",
+    "TR_J_gene" = "#808080",
+    "TR_V_gene" = "#ADD8E6",
+    "TR_V_pseudogene" = "#90EE90",
+    "TR_D_gene" = "#00008B",
+    "IG_C_pseudogene" = "#006400",
+    "TR_J_pseudogene" = "#8B0000",
+    "IG_J_pseudogene" = "#DAA520",
+    "IG_D_gene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "artifact" = "#D2B48C",
+    "Mt_tRNA" = "#D5B5D3",
+    "Mt_rRNA" = "#D3D3D3"
+  )) +
+  theme_minimal()
+
+pdf(paste("Grafic3.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "lncRNA" = "#FFA500",
+    "transcribed_unprocessed_pseudogene" = "#808080",  # Azul
+    "unprocessed_pseudogene" = "#90EE90",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "snRNA" = "#0FBBF0",  # Naranja
+    "transcribed_processed_pseudogene" = "#FFC0CB",  # Rosa
+    "misc_RNA" = "#A52A2A",  # Marrón
+    "TEC" = "#0000FF",  # Gris
+    "transcribed_unitary_pseudogene" = "#ADD8E6",  # Azul claro
+    "snoRNA" = "#008000",  # Verde claro
+    "scaRNA" = "#00008B",  # Azul oscuro
+    "rRNA_pseudogene" = "#006400",  # Verde oscuro
+    "unitary_pseudogene" = "#8B0000",  # Rojo oscuro
+    "pseudogene" = "#DAA520",  # Amarillo
+    "rRNA" = "#2E8B57",  # Verde marino
+    "IG_V_pseudogene" = "#FF69B4",  # Rosa claro
+    "scRNA" = "#D2B48C",  # Marrón claro
+    "IG_V_gene" = "#D3D3D3",  # Gris claro
+    "IG_C_gene" = "#0000FF",
+    "IG_J_gene" = "#008000",
+    "sRNA" = "#FF0000",
+    "ribozyme" = "#800080",
+    "translated_processed_pseudogene" = "#FFA500",
+    "vault_RNA" = "#FFC0CB",
+    "TR_C_gene" = "#A52A2A",
+    "TR_J_gene" = "#808080",
+    "TR_V_gene" = "#ADD8E6",
+    "TR_V_pseudogene" = "#90EE90",
+    "TR_D_gene" = "#00008B",
+    "IG_C_pseudogene" = "#006400",
+    "TR_J_pseudogene" = "#8B0000",
+    "IG_J_pseudogene" = "#DAA520",
+    "IG_D_gene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "artifact" = "#D2B48C",
+    "Mt_tRNA" = "#D5B5D3",
+    "Mt_rRNA" = "#D3D3D3"
+  )) +
+  theme_minimal()
+dev.off()
+
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/biotypes_kidney2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "lncRNA" = "#FFA500",
+    "transcribed_unprocessed_pseudogene" = "#808080",  # Azul
+    "unprocessed_pseudogene" = "#90EE90",  # Verde
+    "processed_pseudogene" = "#800080",  # Morado
+    "snRNA" = "#0FBBF0",  # Naranja
+    "transcribed_processed_pseudogene" = "#FFC0CB",  # Rosa
+    "misc_RNA" = "#A52A2A",  # Marrón
+    "TEC" = "#0000FF",  # Gris
+    "transcribed_unitary_pseudogene" = "#ADD8E6",  # Azul claro
+    "snoRNA" = "#008000",  # Verde claro
+    "scaRNA" = "#00008B",  # Azul oscuro
+    "rRNA_pseudogene" = "#006400",  # Verde oscuro
+    "unitary_pseudogene" = "#8B0000",  # Rojo oscuro
+    "pseudogene" = "#DAA520",  # Amarillo
+    "rRNA" = "#2E8B57",  # Verde marino
+    "IG_V_pseudogene" = "#FF69B4",  # Rosa claro
+    "scRNA" = "#D2B48C",  # Marrón claro
+    "IG_V_gene" = "#D3D3D3",  # Gris claro
+    "IG_C_gene" = "#0000FF",
+    "IG_J_gene" = "#008000",
+    "sRNA" = "#FF0000",
+    "ribozyme" = "#800080",
+    "translated_processed_pseudogene" = "#FFA500",
+    "vault_RNA" = "#FFC0CB",
+    "TR_C_gene" = "#A52A2A",
+    "TR_J_gene" = "#808080",
+    "TR_V_gene" = "#ADD8E6",
+    "TR_V_pseudogene" = "#90EE90",
+    "TR_D_gene" = "#00008B",
+    "IG_C_pseudogene" = "#006400",
+    "TR_J_pseudogene" = "#8B0000",
+    "IG_J_pseudogene" = "#DAA520",
+    "IG_D_gene" = "#2E8B57",
+    "IG_pseudogene" = "#FF69B4",
+    "artifact" = "#D2B48C",
+    "Mt_tRNA" = "#D5B5D3",
+    "Mt_rRNA" = "#D3D3D3"
+  ))  +
+  theme_minimal()
+```
+
+# Distribusció segons aligment
+
+```{r}
+genomic_assigment<- read_delim("/home/nrb/Documentos/R/dades/bulk2/star_rsem/GSM3207009_multiqc_report_data/mqc_rsem_assignment_plot_1.txt")
+genomic_assigment<- as.data.frame(genomic_assigment)
+
+
+merge_assigment<-merge(x=info, y=genomic_assigment, by.x = "Run", by.y = "Sample")
+merge_assigment<-merge_assigment[,-c(2:7)]
+```
+
+```{r}
+genomic_assigment_long  <- gather(merge_assigment, Category, Fraction, "Aligned uniquely to a gene", "Aligned to multiple genes", "Filtered due to too many alignments", "Unalignable reads")
+
+genomic_assigment_long <- genomic_assigment_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(genomic_assigment_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+
+
+
+  
+  # Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(genomic_assigment_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +# Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+```
+
+```{r}
+groups <- split(genomic_assigment_long, genomic_assigment_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/mapping_kidney.csv")
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB"))+
+  theme_minimal() + 
+  theme(
+    legend.text = element_text(size = 18),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 20)     # Tamaño del título de la leyenda
+  )
+
+pdf(paste("Grafic4.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB"))+
+  theme_minimal() + 
+  theme(
+    legend.text = element_text(size = 18),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 20)     # Tamaño del título de la leyenda
+  )
+dev.off()
+
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/mapping_kidney2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Aligned uniquely to a gene" = "blue", "Aligned to multiple genes" = "green", "Filtered due to too many alignments" = "orange",  "Unalignable reads" = "#FFC0CB"))+
+  theme_minimal()
+```
+
+# Distribució segons SortmeRNA
+
+```{r}
+genomic_sortmerna<- read_delim("/home/nrb/Documentos/R/dades/bulk2/star_rsem/GSM3207009_multiqc_report_data/mqc_sortmerna-detailed-plot_1.txt")
+genomic_sortmerna<- as.data.frame(genomic_sortmerna)
+genomic_sortmerna$Sample <- sub("\\_\\d+$", "", genomic_sortmerna$Sample)
+merge_sortmerna<-merge(x=info, y=genomic_sortmerna, by.x = "Run", by.y = "Sample")
+merge_sortmerna<-merge_sortmerna[,-c(2:7)]
+
+```
+
+
+```{r}
+genomic_sortmerna_long  <- gather(merge_sortmerna, Category, Fraction, "rfam-5.8s-database-id98_count" ,"rfam-5s-database-id98_count" ,  "silva-arc-16s-id95_count"  ,    "silva-arc-23s-id98_count"  ,    "silva-bac-16s-id90_count"  ,    "silva-bac-23s-id98_count"   ,   "silva-euk-18s-id95_count"   ,   "silva-euk-28s-id98_count"  )
+
+
+
+genomic_sortmerna_long <- genomic_sortmerna_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+ggplot(genomic_sortmerna_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+
+
+
+
+ggplot(genomic_sortmerna_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+ facet_grid(. ~ Group) +# Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6)) +
+  
+  # Ajustar la posición de la leyenda
+  theme(legend.position = "bottom",  # Colocar la leyenda debajo del gráfico
+        legend.direction = "horizontal",  # Mostrar la leyenda en una fila
+        legend.title = element_text(hjust = 0.5))  # Centrar el título de la leyenda
+```
+```{r}
+groups <- split(genomic_sortmerna_long, genomic_sortmerna_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/sortme_kidney.csv")
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Media de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal()
+
+pdf(paste("Grafic5.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Media de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal()
+dev.off()
+
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/sortme_kidney2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c(
+    "rfam-5.8s-database-id98_count" = "#0FBBF0",
+    "rfam-5s-database-id98_count" = "#0000FF", 
+    "silva-arc-16s-id95_count" = "#008000",  
+    "silva-arc-23s-id98_count" = "#800080",  
+    "silva-bac-16s-id90_count" = "#FFA500",  
+    "silva-bac-23s-id98_count" = "#FFC0CB",  
+    "silva-euk-18s-id95_count" = "#A52A2A", 
+    "silva-euk-28s-id98_count" = "#808080"
+  )) +
+  theme_minimal()
+```
+##### LAST 2 ######
+
+```{r}
+counts <- read.csv("/home/nrb/Documentos/counts/counts2_reduced_ANNA.csv", row.names = 1, header=T, sep=",")
+colname<-colnames(counts)
+counts2 <- read_delim("/home/nrb/Documentos/R/dades/bulk1/rsem.merged.gene_counts.tsv")
+counts2<-as.data.frame(counts2)
+rownames(counts2)<-counts2$gene_id
+counts<-counts2[,colname]
+
+info <- read.delim("/home/nrb/Documentos/counts_RSEM/targets.csv", sep=",")
+colnames(counts)<-info[,14]
+rownames(info)<-info$Sample
+barcode=factor(info$Sample)
+subsample=factor(info$Subgroup)
+group=factor(info$Group)
+time=factor(info$Time)
+
+duplicates<- read_delim("/home/nrb/Documentos/R/dades/bulk1/star_rsem/GSE182856_multiqc_report_data/mqc_picard_deduplication_1.txt")
+duplicates<-as.data.frame(duplicates)
+duplicates<-duplicates[-c(1:36, 61:120),]
+
+junction<- read_delim("/home/nrb/Documentos/R/dades/bulk1/star_rsem/GSE182856_multiqc_report_data/mqc_rseqc_junction_annotation_junctions_plot_Junctions.txt")
+junction<- as.data.frame(junction)
+junction<-junction[-c(1:36, 61:120),]
+
+merge_duplicates<-merge(x=info, y=duplicates, by.x = "Run", by.y = "Sample")
+merge_duplicates<-merge_duplicates[,-c(2:11)]
+
+merge_junction<-merge(x=info, y=junction, by.x = "Run", by.y = "Sample")
+merge_junction<-merge_junction[,-c(2:11)]
+```
+
+# Distribució segons Duplication
+```{r}
+merge_duplicates_long <- gather(merge_duplicates, Category, Fraction, "Unique Unpaired", "Duplicate Unpaired", "Unmapped")
+
+merge_duplicates_long <- merge_duplicates_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_duplicates_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Unique Unpaired" = "blue", "Duplicate Unpaired" = "green", "Unmapped" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+
+# Crear un gráfico de barras apiladas con colores diferentes para cada categoría
+ggplot(merge_duplicates_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Fraction") +
+  scale_fill_manual(values = c("Unique Unpaired" = "blue", "Duplicate Unpaired" = "green", "Unmapped" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+```
+
+```{r}
+# Crear una lista de data frames, uno por cada grupo (Cytoplasmic y Nuclear)
+groups <- split(merge_duplicates_long, merge_duplicates_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/duplicates_liver.csv")
+
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Unique Unpaired" = "blue", "Duplicate Unpaired" = "green", "Unmapped" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 10),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 10)  ) 
+
+pdf(paste("Duplicate.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Unique Unpaired" = "blue", "Duplicate Unpaired" = "green", "Unmapped" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 40),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 40)  )   # Tamaño del título de la leyenda
+dev.off()
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_Fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/duplicates_liver2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Unique Unpaired" = "blue", "Duplicate Unpaired" = "green", "Unmapped" = "orange")) +
+  theme_minimal()
+```
+
+# Distribució segons Junction
+```{r}
+merge_junction_long <- gather(merge_junction, Category, Fraction, "Known Splicing Junctions" , "Partial Novel Splicing Junctions", "Novel Splicing Junctions")
+
+merge_junction_long <- merge_junction_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_junction_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+
+# Crear un gráfico de barras apiladas con colores diferentes para cada categoría
+ggplot(merge_junction_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Fraction") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+```
+
+```{r}
+# Crear una lista de data frames, uno por cada grupo (Cytoplasmic y Nuclear)
+groups <- split(merge_junction_long, merge_junction_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/junction_liver.csv")
+
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 10),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 10)  ) 
+
+pdf(paste("Junction.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 40),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 40)  )   # Tamaño del título de la leyenda
+dev.off()
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_Fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/junction_liver2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal()
+```
+
+
+## KIDNEY LAST 2
+
+```{r}
+counts_kidney_human<-read.delim("/home/nrb/Documentos/R/dades/bulk2/rsem.merged.gene_counts.tsv")
+rownames(counts_kidney_human)<-counts_kidney_human[,1]
+counts_kidney_human<-counts_kidney_human[,-1:-2]
+
+colnames(counts_kidney_human)<-c("N1", "N2", "C1", "C2")
+View(targets_kidney_human)
+targets_kidney_human<-read.delim("/home/nrb/Documentos/R/kidney/SraRunTable_kidney.txt", header=T, sep=",")
+targets_kidney_human<-targets_kidney_human[,c(1,6,8,15,27,28,29)]
+info<-targets_kidney_human
+info$Sample<-c("N1", "N2", "C1", "C2")
+info$Fraction<-c("Nuclear", "Nuclear", "Cytoplasmic", "Cytoplasmic")
+info$Group<-c("Nuc", "Nuc", "Cyt", "Cyt")
+info<-info[c(3,4,1,2),]
+write.csv(info, "/home/nrb/Documentos/R/kidney/info_kidney.csv")
+
+# redueixo el dataframe (nomes Cyt vs Nuc del neurones corticals primaries)
+info$Subgroup<-c(1,2,1,2)
+rownames(info)<-info$Sample
+barcode=factor(info$Sample)
+subgroup=factor(info$Subgroup)
+group=factor(info$Group)
+fraction<-factor(info$Fraction)
+
+duplicates<- read_delim("/home/nrb/Documentos/R/dades/bulk2/star_rsem/GSM3207009_multiqc_report_data/mqc_picard_deduplication_1.txt")
+duplicates<-as.data.frame(duplicates)
+
+junction<- read_delim("/home/nrb/Documentos/R/dades/bulk2/star_rsem/GSM3207009_multiqc_report_data/mqc_rseqc_junction_annotation_junctions_plot_Junctions.txt")
+junction<- as.data.frame(junction)
+
+
+merge_duplicates<-merge(x=info, y=duplicates, by.x = "Run", by.y = "Sample")
+merge_duplicates<-merge_duplicates[,-c(2:7)]
+
+merge_junction<-merge(x=info, y=junction, by.x = "Run", by.y = "Sample")
+merge_junction<-merge_junction[,-c(2:7)]
+```
+
+# Distribució segons Duplication
+```{r}
+merge_duplicates_long <- gather(merge_duplicates, Category, Fraction,"Unique Pairs" , "Unique Unpaired", "Duplicate Unpaired", "Duplicate Pairs Nonoptical", "Unmapped")
+
+merge_duplicates_long <- merge_duplicates_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_duplicates_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Unique Pairs" = "lightblue", "Unique Unpaired" = "blue", "Duplicate Unpaired" = "green","Duplicate Pairs Nonoptical"= "orange" , "Unmapped" = "red")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+
+# Crear un gráfico de barras apiladas con colores diferentes para cada categoría
+ggplot(merge_duplicates_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Fraction") +
+  scale_fill_manual(values =c("Unique Pairs" = "lightblue", "Unique Unpaired" = "blue", "Duplicate Unpaired" = "green","Duplicate Pairs Nonoptical"= "orange" , "Unmapped" = "red")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+```
+
+```{r}
+# Crear una lista de data frames, uno por cada grupo (Cytoplasmic y Nuclear)
+groups <- split(merge_duplicates_long, merge_duplicates_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/duplicates_kidney.csv")
+
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Unique Pairs" = "lightblue", "Unique Unpaired" = "blue", "Duplicate Unpaired" = "green","Duplicate Pairs Nonoptical"= "orange" , "Unmapped" = "red")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 10),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 10)  ) 
+
+pdf(paste("DuplicateK.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Unique Pairs" = "lightblue", "Unique Unpaired" = "blue", "Duplicate Unpaired" = "green","Duplicate Pairs Nonoptical"= "orange" , "Unmapped" = "red")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 40),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 40)  )   # Tamaño del título de la leyenda
+dev.off()
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_Fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/duplicates_kidney2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Unique Pairs" = "lightblue", "Unique Unpaired" = "blue", "Duplicate Unpaired" = "green","Duplicate Pairs Nonoptical"= "orange" , "Unmapped" = "red")) +
+  theme_minimal()
+```
+
+# Distribució segons Junction
+```{r}
+merge_junction_long <- gather(merge_junction, Category, Fraction, "Known Splicing Junctions" , "Partial Novel Splicing Junctions", "Novel Splicing Junctions")
+
+merge_junction_long <- merge_junction_long %>%
+  group_by(Sample) %>%
+  mutate(Percentage = (Fraction / sum(Fraction)) * 100)
+
+# Crear un gráfico de barras apiladas con porcentajes y secciones separadas para "Cytoplasmic" y "Nuclear"
+ggplot(merge_junction_long, aes(x = Sample, y = Percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ Group, nrow = 1) +  # Usar facet_wrap para separar las secciones
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Porcentaje") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+
+# Crear un gráfico de barras apiladas con colores diferentes para cada categoría
+ggplot(merge_junction_long, aes(x = Sample, y = Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ Group) +
+  labs(title = "Distribución de Categorías por Muestra y Grupo", x = "Muestra", y = "Fraction") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal() +
+  scale_x_discrete(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 6))  
+```
+
+```{r}
+# Crear una lista de data frames, uno por cada grupo (Cytoplasmic y Nuclear)
+groups <- split(merge_junction_long, merge_junction_long$Group)
+
+# Calcular la media para cada grupo
+mean_data <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_percentage = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Percentage[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data <- do.call(rbind, mean_data)
+write.csv(mean_data, "/home/nrb/Documentos/R/dades/junction_kidney.csv")
+
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 10),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 10)  ) 
+
+pdf(paste("JunctionK.pdf",sep=""))
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data, aes(x = Group, y = mean_percentage, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal()+ 
+  theme(
+    legend.text = element_text(size = 40),     # Tamaño del texto de la leyenda
+    legend.title = element_text(size = 40)  )   # Tamaño del título de la leyenda
+dev.off()
+
+# Calcular la media para cada grupo
+mean_data2 <- lapply(groups, function(group_data) {
+  return(data.frame(
+    Category = unique(group_data$Category),
+    mean_Fraction = sapply(unique(group_data$Category), function(cat) {
+      mean(group_data$Fraction[group_data$Category == cat])
+    }),
+    Group = unique(group_data$Group)
+  ))
+})
+
+# Convertir la lista de data frames en un único data frame
+mean_data2 <- do.call(rbind, mean_data2)
+write.csv(mean_data2, "/home/nrb/Documentos/R/dades/junction_kidney2.csv")
+# Crear un gráfico de barras apiladas en porcentaje con grupos en el eje X
+ggplot(mean_data2, aes(x = Group, y = mean_Fraction, fill = Category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Count de Categorías por Grupo", x = "Grupo", y = "Porcentaje") +
+  scale_fill_manual(values = c("Known Splicing Junctions" = "red", "Partial Novel Splicing Junctions" = "blue", "Novel Splicing Junctions" = "orange")) +
+  theme_minimal()
+```
+

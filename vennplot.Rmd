@@ -1,0 +1,1174 @@
+---
+title: "Untitled"
+author: "Núria Rivera Brugués"
+date: "2023-12-10"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+## Global options
+options(max.print="75")
+knitr::opts_chunk$set(echo=FALSE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+knitr::opts_knit$set(width=75)
+```
+
+```{r}
+library("BiocManager")
+library("affy")
+library("oligo")
+library("pd.ht.hg.u133.plus.pm")
+library("hgu133plus2.db")
+library("ggplot2")
+library(org.Hs.eg.db)
+library("mogene10sttranscriptcluster.db")
+library(knitr)
+library(rmdformats)
+library("AnnotationDbi")
+library("org.Mm.eg.db")
+library(genekitr)
+library(VennDetail)
+library(VennDiagram)
+library(venn)
+library(hgu133a.db)
+library(mogene10sttranscriptcluster.db)
+library(geneset)
+library(genekitr)
+library(patchwork)
+library(igraph)
+library(ggraph)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(admisc)
+```
+
+
+
+```{r eval=F}
+liver.bulk.mouse<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/liver_2.csv")
+liver.bulk.mouse <- subset(liver.bulk.mouse, !is.na(liver.bulk.mouse[,4]) & liver.bulk.mouse[,4] != "N/A"  & liver.bulk.mouse[,4] != "")
+liver.bulk.human<-unique(liver.bulk.mouse[,4])
+
+
+liver.bulk.mouse<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/liver_3.csv")
+liver.bulk.mouse <- subset(liver.bulk.mouse, !is.na(liver.bulk.mouse[,3]) & liver.bulk.mouse[,3] != "N/A"  & liver.bulk.mouse[,3] != "")
+liver.bulk.human<-unique(liver.bulk.mouse[,3])
+
+
+liver.bulk.mouse<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/liver_4.csv")
+liver.bulk.mouse <- subset(liver.bulk.mouse, !is.na(liver.bulk.mouse[,4]) & liver.bulk.mouse[,4] != "N/A"  & liver.bulk.mouse[,4] != "")
+liver.bulk.human<-unique(liver.bulk.mouse[,4])
+
+
+liver.sc.human<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/liver.sc.symbol2.csv")
+liver.sc.human <- subset(liver.sc.human, !is.na(liver.sc.human[,1]) & liver.sc.human[,1] != "N/A"  & liver.bulk.mouse[,1] != "")
+liver.sc.human<-unique(liver.sc.human[,1])
+
+
+kidney.bulk.human<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/kidney.bulk.symbol2.csv")
+kidney.bulk.human <- subset(kidney.bulk.human, !is.na(kidney.bulk.human[,2]) & kidney.bulk.human[,2] != "N/A"  & liver.bulk.mouse[,2] != "")
+kidney.bulk.human<-unique(kidney.bulk.human[,2])
+
+
+kidney.bulk.human<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/kidney_2.csv")
+kidney.bulk.human <- subset(kidney.bulk.human, !is.na(kidney.bulk.human[,1]) & kidney.bulk.human[,1] != "N/A"  & kidney.bulk.human[,1] != "")
+kidney.bulk.human<-unique(kidney.bulk.human[,1])
+length(kidney.bulk.human)
+```
+
+
+```{r eval=F}
+kidney.bulk.human<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/kidney.bulk.csv")
+kidney.bulk.human<-unique(kidney.bulk.human[,1])
+kidney.bulk.human <- mapIds(org.Hs.eg.db, keys=kidney.bulk.human, column="SYMBOL", keytype="ENSEMBL")
+kidney.bulk.human<-as.data.frame(kidney.bulk.human)
+kidney.bulk.human <- subset(kidney.bulk.human, !is.na(kidney.bulk.human) & kidney.bulk.human != "N/A" & kidney.bulk.human != "")
+kidney.bulk.human <- unique(kidney.bulk.human[,1])
+length(kidney.bulk.human)
+```
+
+
+```{r eval=F}
+kidney.bulk.human<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/DEG_igual.csv")
+kidney.bulk.human<-unique(kidney.bulk.human[,1])
+kidney.bulk.human <- mapIds(org.Hs.eg.db, keys=kidney.bulk.human, column="SYMBOL", keytype="ENSEMBL")
+kidney.bulk.human<-as.data.frame(kidney.bulk.human)
+kidney.bulk.human <- subset(kidney.bulk.human, !is.na(kidney.bulk.human) & kidney.bulk.human != "N/A" & kidney.bulk.human != "")
+kidney.bulk.human <- unique(kidney.bulk.human[,1])
+length(kidney.bulk.human)
+```
+
+
+```{r eval=F}
+kidney.bulk.human<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/DEG_1.csv")
+kidney.bulk.human<-unique(kidney.bulk.human[,1])
+kidney.bulk.human <- mapIds(org.Hs.eg.db, keys=kidney.bulk.human, column="SYMBOL", keytype="ENSEMBL")
+kidney.bulk.human<-as.data.frame(kidney.bulk.human)
+kidney.bulk.human <- subset(kidney.bulk.human, !is.na(kidney.bulk.human) & kidney.bulk.human != "N/A" & kidney.bulk.human != "")
+kidney.bulk.human <- unique(kidney.bulk.human[,1])
+length(kidney.bulk.human)
+```
+
+
+```{r eval=F}
+kidney.sc.mouse<-read.csv("/home/nrb/Escritorio/perAnna/Vennplot_2/dades/kidney.sc.symbol2.csv")
+kidney.sc.mouse <- subset(kidney.sc.mouse, !is.na(kidney.sc.mouse[,4]) & kidney.sc.mouse[,4] != "N/A" & kidney.sc.mouse[,1] != "")
+kidney.sc.human <- unique(kidney.sc.mouse[,4])
+
+
+```
+
+```{r eval=F}
+#write.csv2(liver.bulk.human, "./liver.bulk.human_LAST.csv")
+#write.csv2(liver.sc.human, "./liver.sc.human_LAST.csv")
+#write.csv2(kidney.bulk.human, "./kidney.bulk.human_LAST.csv")
+#write.csv2(kidney.sc.human, "./kidney.sc.human_LAST.csv")
+```
+
+
+
+# Venn Diagrams
+# humà symbol
+# Comparació fetges (bulk-sc)
+
+```{r}
+# liver human
+ven<-venn(list(liver.bulk = liver.bulk.human , 
+                      liver.sc = liver.sc.human))
+
+vendetail<-venndetail(list(liver.bulk =liver.bulk.human, 
+                      liver.sc = liver.sc.human))
+
+
+res<-result(vendetail)
+df.gens<-res[res$Subset=="Shared",]
+gens_fetge_human<-as.vector(df.gens$Detail)
+
+```
+
+
+```{r}
+pdf(paste("Venn_fetge.pdf",sep=""))
+plotVenn(list(liver.bulk = liver.bulk.human , 
+                      liver.sc = liver.sc.human),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(2),
+         alpha_degree = 0.5,
+         main_text_size = 4.5,
+         border_thick = 0
+)
+dev.off()
+
+plotVenn(list(liver.bulk = liver.bulk.human , 
+                      liver.sc = liver.sc.human),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(2),
+         alpha_degree = 0.5,
+         main_text_size = 4.5,
+         border_thick = 0
+)
+```
+
+# Llistat en comparar bulk-scsn de Fetge 
+
+```{r}
+# liver mouse
+fetge <-AnnotationDbi::select(org.Hs.eg.db, keys=gens_fetge_human, keytype = "SYMBOL", columns = c("SYMBOL", "ENSEMBL", "ENTREZID","GO", "ONTOLOGY"))
+gens_fetge_human
+print(kable(fetge))
+write.csv(fetge, "./gens_interseccio_fetgebulk.fetgescsn.csv")
+```
+
+
+
+# Comparació scsn de Ronyó
+```{r}
+ven<-venn(list(kidney.bulk =kidney.bulk.human , 
+                      kidney.sc = kidney.sc.human))
+
+vendetail<-venndetail(list(kidney.bulk =kidney.bulk.human , 
+                      kidney.sc = kidney.sc.human))
+res<-result(vendetail)
+df.gens<-res[res$Subset=="Shared",]
+gens_ronyo_human<-as.vector(df.gens$Detail)
+
+```
+
+```{r}
+library(genekitr)
+pdf(paste("Venn_ronyo.pdf",sep=""))
+plotVenn(list(kidney.bulk =kidney.bulk.human , 
+                      kidney.sc = kidney.sc.human),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(2),
+         alpha_degree = 0.5,
+         main_text_size = 4.5,
+         border_thick = 0
+)
+dev.off()
+plotVenn(list(kidney.bulk =kidney.bulk.human , 
+                      kidney.sc = kidney.sc.human),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(2),
+         alpha_degree = 0.5,
+         main_text_size = 4.5,
+         border_thick = 0
+)
+```
+
+
+# Llistat en comparar bulk-scsn de Ronyó
+```{r}
+# kidney 
+ronyo <-AnnotationDbi::select(org.Hs.eg.db, keys=gens_ronyo_human, keytype = "SYMBOL", columns = c("SYMBOL", "ENSEMBL", "ENTREZID","GO", "ONTOLOGY"))
+print(kable(ronyo))
+write.csv(ronyo, "./gens_interseccio_ronyobulk.ronyoscsn.csv")
+```
+
+
+# Comparació bulks (ronyo-fetge)
+```{r}
+ven<-venn(list(liver.bulk =liver.bulk.human, 
+               kidney.bulk =kidney.bulk.human ))
+
+vendetail<-venndetail(list(liver.bulk =liver.bulk.human, 
+               kidney.bulk =kidney.bulk.human ))
+res<-result(vendetail)
+df.gens<-res[res$Subset=="Shared",]
+gens_bulks_human<-as.vector(df.gens$Detail)
+
+```
+
+
+```{r}
+library(genekitr)
+pdf(paste("Venn_bulks.pdf",sep=""))
+plotVenn(list(liver.bulk =liver.bulk.human, 
+               kidney.bulk =kidney.bulk.human ),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(2),
+         alpha_degree = 0.5,
+         main_text_size = 4.5,
+         border_thick = 0
+)
+dev.off()
+plotVenn(list(liver.bulk =liver.bulk.human, 
+               kidney.bulk =kidney.bulk.human ),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(2),
+         alpha_degree = 0.5,
+         main_text_size = 4.5,
+         border_thick = 0
+)
+```
+
+# Llistat en comparar bulks Fetge-Ronyó
+```{r}
+# bulks 
+bulks <-AnnotationDbi::select(org.Hs.eg.db, keys=gens_bulks_human, keytype = "SYMBOL", columns = c("SYMBOL", "ENSEMBL", "ENTREZID","GO", "ONTOLOGY"))
+
+print(kable(bulks))
+write.csv(bulks, "./gens_interseccio_bulks.csv")
+```
+
+
+# Comparació scs (ronyo-fetge)
+```{r}
+ven<-venn(list(liver.sc = liver.sc.human,
+          kidney.sc = kidney.sc.human))
+vendetail<-venndetail(list(liver.sc = liver.sc.human,
+          kidney.sc = kidney.sc.human))
+res<-result(vendetail)
+df.gens<-res[res$Subset=="Shared",]
+gens_sc_human<-as.vector(df.gens$Detail)
+
+```
+
+```{r}
+library(genekitr)
+pdf(paste("Venn_scsn.pdf",sep=""))
+plotVenn(list(liver.sc = liver.sc.human,
+          kidney.sc = kidney.sc.human),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(2),
+         alpha_degree = 0.5,
+         main_text_size = 4.5,
+         border_thick = 0
+)
+dev.off()
+plotVenn(list(liver.sc = liver.sc.human,
+          kidney.sc = kidney.sc.human),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(2),
+         alpha_degree = 0.5,
+         main_text_size = 4.5,
+         border_thick = 0
+)
+```
+
+
+# Llistat en comparar scsn Fetge-Ronyó
+```{r}
+# scs
+scs <-AnnotationDbi::select(org.Hs.eg.db, keys=gens_sc_human, keytype = "SYMBOL", columns = c("SYMBOL", "ENSEMBL", "ENTREZID","GO", "ONTOLOGY"))
+print(kable(scs))
+write.csv(scs, "./gens_interseccio_scsns.csv")
+```
+
+
+
+
+# Comparació tot
+```{r}
+ven<-venn(list(liver.bulk =liver.bulk.human , 
+                      liver.sc = liver.sc.human,
+               kidney.bulk =kidney.bulk.human , 
+                      kidney.sc = kidney.sc.human))
+```
+
+
+```{r}
+pdf(paste("Venn_tots4.pdf",sep=""))
+plotVenn(list(liver.bulk =liver.bulk.human , 
+                      liver.sc = liver.sc.human,
+               kidney.bulk =kidney.bulk.human , 
+                      kidney.sc = kidney.sc.human),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(4),
+         alpha_degree = 0.4,
+         main_text_size = 3.5,
+         border_thick = 0
+)
+dev.off()
+plotVenn(list(liver.bulk =liver.bulk.human , 
+                      liver.sc = liver.sc.human,
+               kidney.bulk =kidney.bulk.human , 
+                      kidney.sc = kidney.sc.human),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(4),
+         alpha_degree = 0.4,
+         main_text_size = 3.5,
+         border_thick = 0
+)
+```
+
+
+
+
+```{r}
+
+pdf(paste("Upsetplot_4listDEG.pdf",sep=""))
+plotVenn(list(full.liver.bulk =liver.bulk.human , 
+                      full.liver.sc = liver.sc.human,
+              full.kidney.bulk =kidney.bulk.human , 
+                     full.kidney.sc = kidney.sc.human),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+dev.off()
+plotVenn(list(full.liver.bulk =liver.bulk.human , 
+                      full.liver.sc = liver.sc.human,
+              full.kidney.bulk =kidney.bulk.human , 
+                     full.kidney.sc = kidney.sc.human),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+```
+```{r}
+pdf(paste("Upsetplot_4intersects.pdf",sep=""))
+plotVenn(list(intersect.liver =gens_fetge_human, intersect.kidney =gens_ronyo_human, intersect.bulks= gens_bulks_human, intersect.scs= gens_sc_human),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+dev.off()
+plotVenn(list(intersect.liver =gens_fetge_human, intersect.kidney =gens_ronyo_human, intersect.bulks= gens_bulks_human, intersect.scs= gens_sc_human),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+
+```
+
+```{r}
+pdf(paste("Upsetplot_2intersects.pdf",sep=""))
+plotVenn(list(intersect.liver =gens_fetge_human, intersect.kidney =gens_ronyo_human),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+dev.off()
+plotVenn(list(intersect.liver =gens_fetge_human, intersect.kidney =gens_ronyo_human),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+
+```
+
+
+```{r}
+# gens_ronyo_human
+# gens_fetge_human
+# gens_sc_human
+# gens_bulks_human
+```
+
+######################### FETGE ########################################
+########################################################################
+```{r}
+hg_gs <- geneset::getGO(org = "human",ont = "bp")
+selectedEntrezsUP<-gens_fetge_human
+# ORA analysis
+ego3 <- genORA(selectedEntrezsUP, geneset = hg_gs, p_cutoff = 0.05, q_cutoff = 0.05)
+# next we only show ten sample terms 
+head(ego3)
+
+```
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bar")
+p2 <- plotEnrich(ego3, plot_type = "bar", term_metric = "GeneRatio", stats_metric = "pvalue")
+p3 <- plotEnrich(ego3, plot_type = "bar", up_color = "#E69056", down_color = "#325CAC")
+p4 <- plotEnrich(ego3, plot_type = "bar", wrap_length = 25)
+p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+
+
+pdf(paste("BarPlot_fetge.pdf",sep=""))
+p1 
+dev.off()
+
+pdf(paste("BarPlot2_fetge.pdf",sep=""))
+p2 
+dev.off()
+```
+
+
+
+
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bubble")
+p2 <- plotEnrich(ego3, plot_type = "bubble", 
+                 scale_ratio = 0.5, stats_metric = "qvalue")
+p1 / p2 + plot_annotation(tag_levels = "A")
+
+
+pdf(paste("BubblePlot_fetge.pdf",sep=""))
+p2 
+dev.off()
+```
+```{r}
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 8,
+           legend_text_size = 4,
+           n_term = 6) # show terms
+
+
+pdf(paste("PlotEnrich-fetge.pdf",sep=""))
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 8,
+           legend_text_size =4,
+           n_term = 6) # show terms
+dev.off()
+```
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "lollipop")
+p2 <- plotEnrich(ego3,
+  plot_type = "lollipop",
+  scale_ratio = .3,
+  stats_metric = "pvalue",
+  term_metric = "RichFactor",
+  up_color = "#a32a31",
+  down_color = "#f7dcca"
+)
+p1 + p2 + plot_annotation(tag_levels = "A")
+
+
+pdf(paste("Lollipop_fetge.pdf",sep=""))
+p1 
+dev.off()
+
+pdf(paste("Lollipop2_fetge.pdf",sep=""))
+p2
+dev.off()
+```
+
+
+```{r}
+plotEnrich(ego3, plot_type = "wordcloud")
+
+pdf(paste("Wordcloudplot.pdf",sep=""))
+plotEnrich(ego3, plot_type = "wordcloud")
+dev.off()
+```
+```{r}
+pdf(paste("Upsetplot_fetge.pdf",sep=""))
+plotEnrich(ego3, plot_type = "upset", main_text_size = 10, legend_text_size = 6)
+dev.off()
+
+plotEnrich(ego3, plot_type = "upset",main_text_size = 10,legend_text_size = 6)
+```
+
+```{r}
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+#“bar”, “wego”, “dot”, “bubble”, “lollipop”, “geneheat”, “genechord”, “network”, “gomap”, “goheat”, “gotangram”, “wordcloud”, “upset”
+
+pdf(paste("gotangram_fetge.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+dev.off()
+```
+
+# Network Plot
+
+```{r}
+library(patchwork)
+library(igraph)
+library(ggraph)
+p1 <- plotEnrich(ego3, plot_type = "network", scale_ratio = 0.5)
+p2 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "circle", scale_ratio = 0.5)
+p3 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "grid", sim_method = "Wang",
+                 up_color = "#a32a31", down_color = "#f7dcca",
+                 scale_ratio = 0.5)
+(p1 + p2) / p3 + plot_annotation(tag_levels = "A")
+
+
+
+pdf(paste("Network.pdf",sep=""))
+ p3 
+dev.off()
+```
+
+#  GO-specific: WEGO Plot
+
+```{r}
+# 1st step: prepare input IDs
+data(geneList, package = "genekitr")
+id <- names(geneList)[abs(geneList) > 2]
+id<-gens_fetge_human
+
+# 2nd step: prepare CC and MF gene sets
+go_cc <- geneset::getGO(org = "human",ont = "cc")
+go_mf <- geneset::getGO(org = "human",ont = "mf")
+
+
+# 3rd step: analysis
+ego_cc <- genORA(id, geneset = go_cc)
+ego_mf <- genORA(id, geneset = go_mf)
+
+
+# 4th step: merge two data frames
+# Note: each data frame should add new column "Ontology"
+ego_cc <- ego_cc %>% dplyr::mutate(Ontology = "cc") %>% dplyr::rename(ID = 1)
+ego_mf <- ego_mf %>% dplyr::mutate(Ontology = "mf") %>% dplyr::rename(ID = 1)
+
+all_ego <- rbind(ego_cc,ego_mf)
+```
+
+```{r }
+plotEnrich(all_ego, plot_type = "wego", n_term = 5)
+
+pdf(paste("WEGOPlot.pdf",sep=""))
+plotEnrich(all_ego, plot_type = "wego", n_term = 5)
+dev.off()
+```
+
+
+# GO-specific: Map Plot
+
+```{r}
+
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+
+pdf(paste("MapPlot_fetge.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+dev.off()
+```
+
+# GO-specific: Terms Heatmap Plot
+
+```{r}
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+
+pdf(paste("TermsHeatmap_fetge.pdf",sep=""))
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+dev.off()
+```
+
+# Plot Theme
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "dot")
+p2 <- plotEnrich(ego3,
+  plot_type = "dot",
+  main_text_size = 10,
+  legend_text_size = 10
+)
+
+p3 <- plotEnrich(ego3,
+  plot_type = "dot",
+  border_thick = 3,
+  remove_grid = F
+)
+
+p4 <- plotEnrich(ego3,
+  plot_type = "dot",
+  remove_main_text = T,
+  remove_legend_text = T,
+  remove_legend = T
+)
+p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+
+
+pdf(paste("PlotTheme_fetge.pdf",sep=""))
+p1 
+dev.off()
+```
+
+
+################## RONYO #######################
+#################################################
+
+
+```{r}
+# gens_ronyo_human
+# gens_fetge_human
+# gens_sc_human
+# gens_bulks_human
+```
+
+######################### FETGE ########################################
+########################################################################
+
+```{r}
+hg_gs <- geneset::getGO(org = "human",ont = "bp")
+selectedEntrezsUP<-gens_ronyo_human
+# ORA analysis
+ego3 <- genORA(selectedEntrezsUP, geneset = hg_gs, p_cutoff = 0.05, q_cutoff = 0.05)
+# next we only show ten sample terms 
+head(ego3)
+
+```
+
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bar")
+p2 <- plotEnrich(ego3, plot_type = "bar", term_metric = "GeneRatio", stats_metric = "pvalue")
+p3 <- plotEnrich(ego3, plot_type = "bar", up_color = "#E69056", down_color = "#325CAC")
+p4 <- plotEnrich(ego3, plot_type = "bar", wrap_length = 25)
+p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+
+
+pdf(paste("BarPlot_ronyo.pdf",sep=""))
+p1 
+dev.off()
+
+pdf(paste("BarPlot2_ronyo.pdf",sep=""))
+p2 
+dev.off()
+```
+
+
+
+
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bubble")
+p2 <- plotEnrich(ego3, plot_type = "bubble", 
+                 scale_ratio = 0.5, stats_metric = "qvalue")
+p1 / p2 + plot_annotation(tag_levels = "A")
+
+
+pdf(paste("BubblePlot_ronyo.pdf",sep=""))
+p2 
+dev.off()
+```
+
+```{r}
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 8,
+           legend_text_size = 4,
+           n_term = 6) # show terms
+
+
+pdf(paste("PlotEnrich-ronyo.pdf",sep=""))
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 8,
+           legend_text_size =4,
+           n_term = 6) # show terms
+dev.off()
+```
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "lollipop")
+p2 <- plotEnrich(ego3,
+  plot_type = "lollipop",
+  scale_ratio = .3,
+  stats_metric = "pvalue",
+  term_metric = "RichFactor",
+  up_color = "#a32a31",
+  down_color = "#f7dcca"
+)
+p1 + p2 + plot_annotation(tag_levels = "A")
+
+
+pdf(paste("Lollipop_ronyo.pdf",sep=""))
+p1 
+dev.off()
+
+pdf(paste("Lollipop2_ronyo.pdf",sep=""))
+p2
+dev.off()
+```
+
+
+```{r}
+plotEnrich(ego3, plot_type = "wordcloud")
+
+pdf(paste("Wordcloudplot_ronyo.pdf",sep=""))
+plotEnrich(ego3, plot_type = "wordcloud")
+dev.off()
+```
+
+```{r}
+pdf(paste("Upsetplot_ronyo.pdf",sep=""))
+plotEnrich(ego3, plot_type = "upset", main_text_size = 10, legend_text_size = 6)
+dev.off()
+
+plotEnrich(ego3, plot_type = "upset",main_text_size = 10,legend_text_size = 6)
+```
+
+```{r}
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+#“bar”, “wego”, “dot”, “bubble”, “lollipop”, “geneheat”, “genechord”, “network”, “gomap”, “goheat”, “gotangram”, “wordcloud”, “upset”
+
+pdf(paste("gotangram_ronyo.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+dev.off()
+```
+
+# Network Plot
+
+```{r}
+library(patchwork)
+library(igraph)
+library(ggraph)
+p1 <- plotEnrich(ego3, plot_type = "network", scale_ratio = 0.5)
+p2 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "circle", scale_ratio = 0.5)
+p3 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "grid", sim_method = "Wang",
+                 up_color = "#a32a31", down_color = "#f7dcca",
+                 scale_ratio = 0.5)
+(p1 + p2) / p3 + plot_annotation(tag_levels = "A")
+
+
+
+pdf(paste("Network_ronyo.pdf",sep=""))
+ p3 
+dev.off()
+```
+
+#  GO-specific: WEGO Plot
+
+```{r}
+# 1st step: prepare input IDs
+data(geneList, package = "genekitr")
+id <- names(geneList)[abs(geneList) > 2]
+id<-gens_ronyo_human
+
+# 2nd step: prepare CC and MF gene sets
+go_cc <- geneset::getGO(org = "human",ont = "cc")
+go_mf <- geneset::getGO(org = "human",ont = "mf")
+
+
+# 3rd step: analysis
+ego_cc <- genORA(id, geneset = go_cc)
+# ego_mf <- genORA(id, geneset = go_mf)
+
+
+# 4th step: merge two data frames
+# Note: each data frame should add new column "Ontology"
+ego_cc <- ego_cc %>% dplyr::mutate(Ontology = "cc") %>% dplyr::rename(ID = 1)
+# ego_mf <- ego_mf %>% dplyr::mutate(Ontology = "mf") %>% dplyr::rename(ID = 1)
+
+all_ego <- rbind(ego_cc)
+```
+
+```{r }
+plotEnrich(all_ego, plot_type = "wego", n_term = 5)
+
+pdf(paste("WEGOPlot_ronyo.pdf",sep=""))
+plotEnrich(all_ego, plot_type = "wego", n_term = 5)
+dev.off()
+```
+
+
+# GO-specific: Map Plot
+
+```{r}
+
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+
+pdf(paste("MapPlot_ronyo.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+dev.off()
+```
+
+# GO-specific: Terms Heatmap Plot
+
+```{r}
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+
+pdf(paste("TermsHeatmap_ronyo.pdf",sep=""))
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+dev.off()
+```
+
+# Plot Theme
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "dot")
+p2 <- plotEnrich(ego3,
+  plot_type = "dot",
+  main_text_size = 10,
+  legend_text_size = 10
+)
+
+p3 <- plotEnrich(ego3,
+  plot_type = "dot",
+  border_thick = 3,
+  remove_grid = F
+)
+
+p4 <- plotEnrich(ego3,
+  plot_type = "dot",
+  remove_main_text = T,
+  remove_legend_text = T,
+  remove_legend = T
+)
+p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+
+
+pdf(paste("PlotTheme_ronyo.pdf",sep=""))
+p1 
+dev.off()
+```
+
+
+```{r}
+nuclironyo_bulk<-read.csv2("/home/nrb/Escritorio/perAnna/Vennplot/LLISTA/llista_nuclironyo_bulk.csv", sep=",", row.names = 1)
+nuclironyo_bulk <- subset(nuclironyo_bulk, !is.na(nuclironyo_bulk) & nuclironyo_bulk != "N/A"  & nuclironyo_bulk != "", row.names = 1)
+nuclironyo_bulk<-unique(nuclironyo_bulk)
+
+
+nuclironyo_sc<-read.csv2("/home/nrb/Escritorio/perAnna/Vennplot/LLISTA/llista_nuclironyo_sc.csv", sep="," , row.names = 1)
+nuclironyo_sc <- subset(nuclironyo_sc, !is.na(nuclironyo_sc) & nuclironyo_sc != "N/A"  & nuclironyo_sc != "", row.names = 1)
+nuclironyo_sc<-unique(nuclironyo_sc)
+
+nuclifetge_bulk<-read.csv2("/home/nrb/Escritorio/perAnna/Vennplot/LLISTA/llista_nuclifetge_bulk.csv", sep="," , row.names = 1)
+nuclifetge_bulk <- subset(nuclifetge_bulk, !is.na(nuclifetge_bulk) & nuclifetge_bulk != "N/A"  & nuclifetge_bulk != "", row.names = 1)
+nuclifetge_bulk<-unique(nuclifetge_bulk)
+
+nuclifetge_sc<-read.csv2("/home/nrb/Escritorio/perAnna/Vennplot/LLISTA/llista_nuclifetge_sc.csv", sep="," , row.names = 1)
+nuclifetge_sc <- subset(nuclifetge_sc, !is.na(nuclifetge_sc) & nuclifetge_sc != "N/A"  & nuclifetge_sc != "", row.names = 1)
+nuclifetge_sc<-unique(nuclifetge_sc)
+
+```
+
+
+```{r}
+pdf(paste("nucli.pdf",sep=""))
+plotVenn(list(nucli.fetge.bulk =nuclifetge_bulk[,1] , 
+                      nucli.fetge.sc = nuclifetge_sc[,1] ,
+               nucli.ronyo.bulk =nuclironyo_bulk[,1]  , 
+                      nucli.ronyo.sc = nuclironyo_sc[,1] ),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(4),
+         alpha_degree = 0.4,
+         main_text_size = 3.5,
+         border_thick = 0
+)
+
+dev.off()
+
+plotVenn(list(nucli.fetge.bulk =nuclifetge_bulk[,1] , 
+                      nucli.fetge.sc = nuclifetge_sc[,1] ,
+               nucli.ronyo.bulk =nuclironyo_bulk[,1]  , 
+                      nucli.ronyo.sc = nuclironyo_sc[,1] ),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(4),
+         alpha_degree = 0.4,
+         main_text_size = 3.5,
+         border_thick = 0
+)
+
+```
+
+
+
+
+
+
+
+```{r}
+citosolfetge_bulk<-read.csv2("/home/nrb/Escritorio/perAnna/Vennplot/LLISTA/llista_citosolfetge_bulk.csv", sep="," , row.names = 1)
+citosolfetge_bulk <- subset(citosolfetge_bulk, !is.na(citosolfetge_bulk) & citosolfetge_bulk != "N/A"  & citosolfetge_bulk != "", row.names = 1)
+citosolfetge_bulk<-unique(citosolfetge_bulk)
+
+citosolfetge_sc<-read.csv2("/home/nrb/Escritorio/perAnna/Vennplot/LLISTA/llista_citosolfetge_sc.csv", sep="," , row.names = 1)
+citosolfetge_sc <- subset(citosolfetge_sc, !is.na(citosolfetge_sc) & citosolfetge_sc != "N/A"  & citosolfetge_sc != "", row.names = 1)
+citosolfetge_sc<-unique(citosolfetge_sc)
+
+citosolronyo_bulk<-read.csv2("/home/nrb/Escritorio/perAnna/Vennplot/LLISTA/llista_citosolronyo_bulk.csv", sep=",", row.names = 1 )
+citosolronyo_bulk <- subset(citosolronyo_bulk, !is.na(citosolronyo_bulk) & citosolronyo_bulk != "N/A"  & citosolronyo_bulk != "", row.names = 1)
+citosolronyo_bulk<-unique(citosolronyo_bulk)
+
+citosolronyo_sc<-read.csv2("/home/nrb/Escritorio/perAnna/Vennplot/LLISTA/llista_citosolronyo_sc.csv", sep="," , row.names = 1)
+citosolronyo_sc <- subset(citosolronyo_sc, !is.na(citosolronyo_sc) & citosolronyo_sc != "N/A"  & citosolronyo_sc != "", row.names = 1)
+citosolronyo_sc<-unique(citosolronyo_sc)
+```
+
+```{r}
+pdf(paste("citosol.pdf",sep=""))
+plotVenn(list(citosol.fetge.bulk =citosolfetge_bulk[,1] , 
+                      citosol.fetge.sc = citosolfetge_sc[,1] ,
+               citosol.ronyo.bulk =citosolronyo_bulk[,1]  , 
+                      citosol.ronyo.sc = citosolronyo_sc[,1] ),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(4),
+         alpha_degree = 0.4,
+         main_text_size = 3.5,
+         border_thick = 0
+)
+dev.off()
+
+plotVenn(list(citosol.fetge.bulk =citosolfetge_bulk[,1] , 
+                      citosol.fetge.sc = citosolfetge_sc[,1] ,
+               citosol.ronyo.bulk =citosolronyo_bulk[,1]  , 
+                      citosol.ronyo.sc = citosolronyo_sc[,1] ),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(4),
+         alpha_degree = 0.4,
+         main_text_size = 3.5,
+         border_thick = 0
+)
+```
+```{r}
+totfetgebulk<-c(citosolfetge_bulk[,1],nuclifetge_bulk[,1])
+totronyobulk<-c(citosolronyo_bulk[,1],nuclironyo_bulk[,1])
+totfetgesc<-c(citosolfetge_sc[,1],nuclifetge_sc[,1])
+totronyosc<-c(citosolronyo_sc[,1],nuclironyo_sc[,1])
+```
+
+```{r}
+pdf(paste("tot.pdf",sep=""))
+plotVenn(list(fetge.bulk =totfetgebulk , 
+                      fetge.sc = totfetgesc ,
+                      ronyo.sc = totronyosc,
+                ronyo.bulk =totronyobulk),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(4),
+         alpha_degree = 0.4,
+         main_text_size = 3.5,
+         border_thick = 0
+)
+dev.off()
+
+plotVenn(list(fetge.bulk =totfetgebulk , 
+                      fetge.sc = totfetgesc ,
+                      ronyo.sc = totronyosc,
+                ronyo.bulk =totronyobulk),
+         use_venn = TRUE,
+         color = ggsci::pal_lancet()(4),
+         alpha_degree = 0.4,
+         main_text_size = 3.5,
+         border_thick = 0
+)
+```
+```{r}
+pdf(paste("upsettot.pdf",sep=""))
+plotVenn(list(fetge.bulk =totfetgebulk , 
+                      fetge.sc = totfetgesc ,
+                      ronyo.sc = totronyosc,
+                ronyo.bulk =totronyobulk),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+dev.off()
+plotVenn(list(fetge.bulk =totfetgebulk , 
+                      fetge.sc = totfetgesc ,
+                      ronyo.sc = totronyosc,
+                ronyo.bulk =totronyobulk),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+```
+```{r}
+pdf(paste("upsetnucli.pdf",sep=""))
+plotVenn(list(nucli.fetge.bulk =nuclifetge_bulk[,1] , 
+                      nucli.fetge.sc = nuclifetge_sc[,1] ,
+                      nucli.ronyo.sc = nuclironyo_sc[,1],
+                nucli.ronyo.bulk =nuclironyo_bulk[,1] ),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+dev.off()
+
+plotVenn(list(nucli.fetge.bulk =nuclifetge_bulk[,1] , 
+                      nucli.fetge.sc = nuclifetge_sc[,1] ,
+                      nucli.ronyo.sc = nuclironyo_sc[,1],
+                nucli.ronyo.bulk =nuclironyo_bulk[,1] ),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+```
+
+```{r}
+pdf(paste("upsetcitosol.pdf",sep=""))
+plotVenn(list(citosol.fetge.bulk =citosolfetge_bulk[,1] , 
+                      citosol.fetge.sc = citosolfetge_sc[,1] ,
+                      citosol.ronyo.sc = citosolronyo_sc[,1],
+                citosol.ronyo.bulk =citosolronyo_bulk[,1] ),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+dev.off()
+
+plotVenn(list(citosol.fetge.bulk =citosolfetge_bulk[,1] , 
+                      citosol.fetge.sc = citosolfetge_sc[,1] ,
+                      citosol.ronyo.sc = citosolronyo_sc[,1],
+                citosol.ronyo.bulk =citosolronyo_bulk[,1] ),
+         use_venn = FALSE,
+         main_text_size = 12,
+         legend_text_size = 6,
+         legend_position = 'left'
+)
+```
+
+
+
+
+
+
+
+
+```{r}
+# liver human
+ven_bulk<-venn(list(fetge.bulk =totfetgebulk , 
+                ronyo.bulk =totronyobulk))
+
+vendetail_bulk<-venndetail(list(fetge.bulk =totfetgebulk , 
+                ronyo.bulk =totronyobulk))
+
+
+res_bulk<-result(vendetail_bulk)
+df.gens_bulk<-res_bulk[res_bulk$Subset=="Shared",]
+gens_bulk<-as.vector(df.gens_bulk$Detail)
+```
+
+
+```{r}
+ven_sc<-venn(list(fetge.sc =totfetgesc , 
+                ronyo.sc =totronyosc))
+
+vendetail_sc<-venndetail(list(fetge.sc =totfetgesc , 
+                ronyo.sc =totronyosc))
+
+
+
+res_sc<-result(vendetail_sc)
+df.gens_sc<-res_sc[res_sc$Subset=="Shared",]
+gens_sc<-as.vector(df.gens_sc$Detail)
+```
+
+SINGLE CELL
+```{r}
+hg_gs <- geneset::getGO(org = "human",ont = "bp")
+
+# ORA analysis
+ego3_sc <- genORA(gens_sc, geneset = hg_gs, p_cutoff = 0.05, q_cutoff = 0.05)
+# next we only show ten sample terms
+```
+
+```{r}
+kable(ego3_sc[,c(1,2,8)], row.names = F)
+```
+
+
+```{r}
+plotEnrich(ego3_sc,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 8,
+           legend_text_size = 4,
+           n_term = 6) # show terms
+
+```
+
+```{r}
+hg_gs <- geneset::getGO(org = "human",ont = "bp")
+
+# ORA analysis
+ego3_bulk <- genORA(gens_bulk, geneset = hg_gs, p_cutoff = 0.05, q_cutoff = 0.05)
+# next we only show ten sample terms 
+
+plotEnrich(ego3_bulk,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 8,
+           legend_text_size = 4,
+           n_term = 6) # show terms
+```
+
+
+`
+

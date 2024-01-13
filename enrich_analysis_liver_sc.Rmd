@@ -1,0 +1,1302 @@
+---
+title: "Untitled"
+author: "Núria Rivera Brugués"
+date: "2023-12-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(Seurat)
+library(sp)
+library(Matrix)
+library(SeuratObject)
+library(patchwork)
+library(dplyr)
+library(tidyverse)
+library(ggplot2) # plots
+library(magrittr) # %>% operator
+library(reticulate) # required for "leiden" clustering
+library(enrichR) # functional enrichment
+library(future) # multicore support for Seurat
+library(cowplot)
+library(SingleCellExperiment)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+```
+
+# Finding differentially expressed features (cluster biomarkers)
+
+
+```{r}
+liver.integrated <- readRDS("liver.integrated.rds")
+```
+
+
+```{r}
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+liver.integrated.markers <- FindAllMarkers(liver.integrated, only.pos = FALSE, min.pct = 0.25, logfc.threshold = 0.25)
+liver.integrated.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC)
+write.csv2(liver.integrated.markers, "liver.integrated.markers41.csv")
+```
+
+```{r}
+clusterSC.markers <- FindMarkers(liver.integrated, ident.1 = "SC", logfc.threshold = 0.25, test.use = "roc", only.pos = T)
+head(clusterSC.markers, n = 5)
+write.csv2(clusterSC.markers, "clusterSC.markers.csv")
+```
+
+```{r}
+clusterTST.markers <- FindMarkers(liver.integrated, ident.1 = "TST", logfc.threshold = 0.25, test.use = "roc", only.pos = T)
+head(clusterTST.markers, n = 5)
+write.csv2(clusterTST.markers, "clusterTST.markers.csv")
+```
+
+```{r}
+VlnPlot(liver.integrated, features = c("HBA2", "SYDE2"))
+```
+
+
+```{r}
+# you can plot raw counts as well
+VlnPlot(liver.integrated, features = c("NKG7", "MALAT1"),  log = TRUE)
+```
+
+
+```{r}
+FeaturePlot(liver.integrated, features = c("MALAT1", "NKG7", "HBA2", "SYDE2"))
+```
+
+
+```{r}
+top10 <- liver.integrated.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC)
+
+pdf(paste("heatmap_clusters.pdf",sep=""))
+DoHeatmap(liver.integrated, features = top10$gene) 
+dev.off()
+DoHeatmap(liver.integrated, features = top10$gene) 
+```
+
+```{r}
+markers41 <- FindMarkers(liver.integrated, ident.1 = "SC", ident.2 = "TST", verbose = FALSE, assay = "integrated", slot = "scale.data", min.pct = 0.25, test.use = "wilcox", logfc.threshold = 0.25)
+head(markers41, n = 5)
+```
+
+
+```{r}
+markers41 <- markers41 %>%  arrange(avg_diff)
+write.csv2(markers41, "markers41.csv")
+```
+
+
+
+########################## ORA GLOBAL #######################################################################################
+#############################################################################################################################################################################################################################################################
+
+```{r}
+dir2<-"/home/nrb/Escritorio/perAnna/18_hepato/14414525_C41_SC_raw_data/"
+matrix_obj_C41_SC<-Read10X(dir2, unique.features = TRUE, strip.suffix = TRUE)
+markers41<-read.csv2("./markers41.csv")
+markers41 <- markers41 %>%  arrange(avg_diff)
+
+allEntrezs <- rownames(matrix_obj_C41_SC)
+rownames(markers41)<-markers41$X
+selectedEntrezsUP <- markers41$X
+length(allEntrezs); length(selectedEntrezsUP)
+
+
+ego <- enrichGO(gene = selectedEntrezsUP, 
+                universe = allEntrezs,
+                keyType = "SYMBOL",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.01, 
+                readable = TRUE)
+
+```
+
+```{r, warning=FALSE}
+head(ego)
+ego_results <- data.frame(ego)
+write.csv(ego_results, "clusterProfiler_ORAresults_GO.csv")
+```
+
+```{r, warning=FALSE}
+dotplot(ego, showCategory=10)
+pdf(paste("dotplot.pdf",sep=""))
+dotplot(ego, showCategory=10)
+dev.off()
+```
+
+```{r, warning=FALSE}
+pdf(paste("GO.pdf",sep=""))
+goplot(ego, showCategory=5, cex=0.5)
+dev.off()
+
+goplot(ego, showCategory=5, cex=0.5)
+```
+
+```{r, warning=FALSE}
+## Gene network para los términos seleccionados
+pdf(paste("cneplot.pdf",sep=""))
+cnetplot(ego) 
+dev.off()
+
+cnetplot(ego) 
+```
+
+
+```{r, warning=FALSE}
+ego2 = clusterProfiler::simplify(ego, cutoff = 0.01, by = "p.adjust")
+png("./cnetplot_transp.png", units = "in", width = 24, height = 16, res = 600,
+    bg = "transparent")
+par(bg = NA)
+a <- cnetplot(ego2, showCategory = 5, cex_category = 1, cex_label_category = 2.5,
+    cex_gene = 1, cex_label_gene = 1, circular = FALSE, colorEdge = TRUE)
+a
+invisible(dev.off())
+a
+```
+
+
+
+
+
+```{r, warning=FALSE}
+## Enrichment Map
+library(enrichplot)
+ego_sim <- pairwise_termsim(ego)
+pdf(paste("emaplot.pdf",sep=""))
+emapplot(ego_sim, cex_label_category=0.6)
+dev.off()
+
+emapplot(ego_sim, cex_label_category=0.6)
+```
+
+```{r, warning=FALSE, fig.width=15, fig.height=15}
+term_similarity_matrix = pairwise_termsim(ego)
+emapplot(term_similarity_matrix, showCategory = 15, group_category = TRUE, group_legend = TRUE)
+
+pdf(paste("emaplot_grouped.pdf",sep=""),width = 10, height = 10)
+emapplot(term_similarity_matrix, showCategory = 15, group_category = TRUE, group_legend = TRUE)
+dev.off()
+```
+
+```{r, warning=FALSE}
+library(enrichplot)
+
+pdf(paste("heatplot_ego.pdf",sep=""),width = 9, height = 10)
+heatplot(ego)
+dev.off()
+heatplot(ego)
+```
+
+
+```{r}
+library(geneset)
+library(genekitr)
+
+hg_gs <- geneset::getGO(org = "human",ont = "bp")
+
+# ORA analysis
+ego3 <- genORA(selectedEntrezsUP, geneset = hg_gs, p_cutoff = 0.01, q_cutoff = 0.01)
+# next we only show ten sample terms 
+ego3 <- ego3[1:10, ]
+head(ego3)
+```
+
+# Bar Plot
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bar")
+p2 <- plotEnrich(ego3, plot_type = "bar", term_metric = "GeneRatio", stats_metric = "pvalue")
+p3 <- plotEnrich(ego3, plot_type = "bar", up_color = "#E69056", down_color = "#325CAC")
+p4 <- plotEnrich(ego3, plot_type = "bar", wrap_length = 25)
+#p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+p1
+p2
+
+pdf(paste("BarPlot.pdf",sep=""))
+p1 
+dev.off()
+
+pdf(paste("BarPlot2.pdf",sep=""))
+p2
+dev.off()
+```
+
+#  Bubble Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bubble")
+p2 <- plotEnrich(ego3, plot_type = "bubble", 
+                 scale_ratio = 0.5, stats_metric = "qvalue")
+#p1 / p2 + plot_annotation(tag_levels = "A")
+p2
+
+pdf(paste("BubblePlot.pdf",sep=""))
+p2
+dev.off()
+```
+
+#  Dot Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "dot")
+p2 <- plotEnrich(ego3,
+  plot_type = "dot",
+  scale_ratio = 0.5,
+  stats_metric = "pvalue",
+  term_metric = "RichFactor"
+)
+#p1 + p2 + plot_annotation(tag_levels = "A")
+p1
+p2
+pdf(paste("DOTPlot.pdf",sep=""))
+p1 
+dev.off()
+pdf(paste("DOTPlot2.pdf",sep=""))
+p2 
+dev.off()
+```
+
+```{r}
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 10,
+           legend_text_size =8,
+           n_term = 6) # show terms
+
+
+pdf(paste("PlotEnrich.pdf",sep=""))
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 10,
+           legend_text_size =8,
+           n_term = 6) # show terms
+dev.off()
+```
+
+#  Lollipop Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "lollipop")
+p2 <- plotEnrich(ego3,
+  plot_type = "lollipop",
+  scale_ratio = .2,
+  stats_metric = "pvalue",
+  term_metric = "RichFactor",
+  up_color = "#a32a31",
+  down_color = "#f7dcca"
+)
+#p1 + p2 + plot_annotation(tag_levels = "A")
+p1
+p2
+
+pdf(paste("Lollipop.pdf",sep=""))
+p1
+dev.off()
+
+pdf(paste("Lollipop2.pdf",sep=""))
+p2
+dev.off()
+```
+
+
+#  Heatmap Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "geneheat")
+show_gene = c('MALAT1','ABCC2','ABCC2','ABCC2')
+p2 <- plotEnrich(ego3, plot_type = "geneheat", show_gene = show_gene)
+p3 <- plotEnrich(ego3, plot_type = "geneheat", show_gene = show_gene)
+#p1 / p2 / p3 + plot_annotation(tag_levels = "A")
+p1
+pdf(paste("Heatmapplot.pdf",sep=""))
+p1  
+dev.off()
+```
+
+# Wordcloud Plot
+```{r}
+plotEnrich(ego3, plot_type = "wordcloud")
+
+pdf(paste("Wordcloudplot.pdf",sep=""))
+plotEnrich(ego3, plot_type = "wordcloud")
+dev.off()
+```
+
+
+# Upset Plot
+
+```{r}
+pdf(paste("Upsetplot.pdf",sep=""))
+plotEnrich(ego3, plot_type = "upset",main_text_size = 15,legend_text_size = 8)
+dev.off()
+
+plotEnrich(ego3, plot_type = "upset",main_text_size = 15,legend_text_size = 8)
+```
+
+#  GO-specific: Terms Tangram Plot
+```{r}
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+#“bar”, “wego”, “dot”, “bubble”, “lollipop”, “geneheat”, “genechord”, “network”, “gomap”, “goheat”, “gotangram”, “wordcloud”, “upset”
+
+pdf(paste("gotangram.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+dev.off()
+```
+
+
+
+# Network Plot
+
+```{r}
+library(patchwork)
+library(igraph)
+library(ggraph)
+p1 <- plotEnrich(ego3, plot_type = "network", scale_ratio = 0.5)
+p2 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "circle", scale_ratio = 0.5)
+p3 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "grid", sim_method = "Wang",
+                 up_color = "#a32a31", down_color = "#f7dcca",
+                 scale_ratio = 0.5)
+#(p1 + p2) / p3 + plot_annotation(tag_levels = "A")
+p3
+
+
+pdf(paste("Network.pdf",sep=""))
+p3 
+dev.off()
+```
+
+
+
+#  GO-specific: WEGO Plot
+
+```{r}
+# 1st step: prepare input IDs
+id<- markers41$X
+
+# 2nd step: prepare CC and MF gene sets
+go_cc <- geneset::getGO(org = "human",ont = "cc")
+go_mf <- geneset::getGO(org = "human",ont = "mf")
+go_bp <- geneset::getGO(org = "human",ont = "bp")
+
+# 3rd step: analysis
+ego_cc <- genORA(id, geneset = go_cc)
+ego_mf <- genORA(id, geneset = go_mf)
+ego_bp <- genORA(id, geneset = go_bp)
+
+# 4th step: merge two data frames
+# Note: each data frame should add new column "Ontology"
+ego_cc <- ego_cc %>% dplyr::mutate(Ontology = "cc") %>% dplyr::rename(ID = 1)
+ego_mf <- ego_mf %>% dplyr::mutate(Ontology = "mf") %>% dplyr::rename(ID = 1)
+ego_bp <- ego_bp %>% dplyr::mutate(Ontology = "bp") %>% dplyr::rename(ID = 1)
+
+all_ego <- rbind(ego_cc,ego_mf,ego_bp)
+all_ego<-ego_bp
+```
+
+
+```{r }
+plotEnrich(all_ego, plot_type = "wego", n_term = 5, scale_ratio = 0.4)+ theme(axis.text.x = element_text(size = 18))
+
+pdf(paste("WEGOPlot.pdf",sep=""))
+plotEnrich(all_ego, plot_type = "wego", n_term = 5, scale_ratio = 0.4)+ theme(axis.text.x = element_text(size = 18))
+dev.off()
+```
+
+# GO-specific: Map Plot
+
+```{r}
+library(igraph)
+library(ggraph)
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+
+pdf(paste("MapPlot.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+dev.off()
+```
+
+# GO-specific: Terms Heatmap Plot
+
+```{r}
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+
+pdf(paste("TermsHeatmap.pdf",sep=""))
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+dev.off()
+```
+
+
+# Plot Theme
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "dot")
+p2 <- plotEnrich(ego3,
+  plot_type = "dot",
+  main_text_size = 10,
+  legend_text_size = 10
+)
+
+p3 <- plotEnrich(ego3,
+  plot_type = "dot",
+  border_thick = 3,
+  remove_grid = F
+)
+
+p4 <- plotEnrich(ego3,
+  plot_type = "dot",
+  remove_main_text = T,
+  remove_legend_text = T,
+  remove_legend = T
+)
+#p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+p1
+
+pdf(paste("PlotTheme.pdf",sep=""))
+p1 
+dev.off()
+```
+
+#  Advanced Plot
+
+```{r}
+# 1st step: prepare input IDs
+# Since the geneList is logFC decreasing ordered, we could take first 100 as up-regulated genes and vice versa.
+
+markers41 <- markers41[order(markers41$avg_diff, decreasing = TRUE), ]
+up_genes <- rownames(markers41[markers41$avg_diff > 0.8, ])
+down_genes <- rownames(markers41[markers41$avg_diff < -0.4, ])
+ 
+# 2nd step: prepare gene set
+hg_gs <- geneset::getGO(org = "human",ont = "bp")
+
+# 3rd step: ORA analysis separately
+up_go <- genORA(up_genes, geneset = hg_gs)
+down_go <- genORA(down_genes, geneset = hg_gs)
+```
+
+
+```{r fig.height=10}
+plotEnrichAdv(up_go, down_go,
+              plot_type = "one",
+              term_metric = "FoldEnrich",
+              stats_metric = "p.adjust",
+              xlim_left = 25, xlim_right = 15) +
+  theme(legend.position = c(0.2, 0.9))
+
+
+pdf(paste("Advanced.pdf",sep=""))
+plotEnrichAdv(up_go, down_go,
+              plot_type = "one",
+              term_metric = "FoldEnrich",
+              stats_metric = "p.adjust",
+              xlim_left = 25, xlim_right = 15) +
+  theme(legend.position = c(0.2, 0.9))
+dev.off()
+```
+
+```{r fig.height=10}
+plotEnrichAdv(up_go, down_go,
+              plot_type = "two",
+              term_metric = "FoldEnrich",
+              stats_metric = "pvalue",
+              legend_text_size = 5
+) +
+  theme(legend.position = "none")
+
+
+pdf(paste("Advanced2.pdf",sep=""))
+plotEnrichAdv(up_go, down_go,
+              plot_type = "two",
+              term_metric = "FoldEnrich",
+              stats_metric = "pvalue",
+              legend_text_size = 5
+) +
+  theme(legend.position = "none")
+dev.off()
+```
+
+
+
+
+##### UP-REGULATED ################################################################################################################################################################################################################################################################################
+
+```{r}
+allEntrezs <- rownames(matrix_obj_C41_SC)
+rownames(markers41)<-markers41$X
+#selectedEntrezsUP <- markers41$X
+
+markersUP <- markers41 %>% filter(avg_diff>0)
+markersDOWN <- markers41 %>% filter(avg_diff<0)
+selectedEntrezsUP <- markersUP$X
+#selectedEntrezsUP <- markersDOWN$X
+length(allEntrezs); length(selectedEntrezsUP)
+
+library(clusterProfiler)
+library(org.Mm.eg.db)
+ego <- enrichGO(gene = selectedEntrezsUP, 
+                universe = allEntrezs,
+                keyType = "SYMBOL",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.01, 
+                readable = TRUE)
+
+```
+
+```{r, warning=FALSE}
+head(ego)
+ego_results <- data.frame(ego)
+write.csv(ego_results, "clusterProfiler_ORAresults_UpGO.csv")
+```
+
+
+```{r, warning=FALSE}
+dotplot(ego, showCategory=10)
+pdf(paste("dotplot_citosol.pdf",sep=""))
+dotplot(ego, showCategory=10)
+dev.off()
+```
+
+```{r, warning=FALSE}
+pdf(paste("GO_citosol.pdf",sep=""))
+goplot(ego, showCategory=5, cex=0.5)
+dev.off()
+
+goplot(ego, showCategory=5, cex=0.5)
+```
+
+```{r, warning=FALSE}
+## Gene network para los términos seleccionados
+pdf(paste("cneplot_citosol.pdf",sep=""))
+cnetplot(ego) 
+dev.off()
+
+cnetplot(ego) 
+```
+
+
+```{r, warning=FALSE}
+ego2 = clusterProfiler::simplify(ego, cutoff = 0.01, by = "p.adjust")
+png("./cnetplot_transp_citosol.png", units = "in", width = 24, height = 16, res = 600,
+    bg = "transparent")
+par(bg = NA)
+a <- cnetplot(ego2, showCategory = 5, cex_category = 1, cex_label_category = 2.5,
+    cex_gene = 1, cex_label_gene = 1, circular = FALSE, colorEdge = TRUE)
+a
+invisible(dev.off())
+a
+```
+
+
+
+
+
+```{r, warning=FALSE}
+## Enrichment Map
+library(enrichplot)
+ego_sim <- pairwise_termsim(ego)
+pdf(paste("emaplot_citosol.pdf",sep=""))
+emapplot(ego_sim, cex_label_category=0.6)
+dev.off()
+
+emapplot(ego_sim, cex_label_category=0.6)
+```
+
+```{r, warning=FALSE, fig.width=15, fig.height=15}
+term_similarity_matrix = pairwise_termsim(ego)
+emapplot(term_similarity_matrix, showCategory = 15, group_category = TRUE, group_legend = TRUE)
+
+pdf(paste("emaplot_grouped_citosol.pdf",sep=""),width = 10, height = 10)
+emapplot(term_similarity_matrix, showCategory = 15, group_category = TRUE, group_legend = TRUE)
+dev.off()
+```
+
+```{r, warning=FALSE}
+library(enrichplot)
+
+pdf(paste("heatplot_ego_citosol.pdf",sep=""),width = 9, height = 10)
+heatplot(ego)
+dev.off()
+heatplot(ego)
+```
+
+
+```{r}
+library(geneset)
+library(genekitr)
+
+hg_gs <- geneset::getGO(org = "human",ont = "bp")
+
+# ORA analysis
+ego3 <- genORA(selectedEntrezsUP, geneset = hg_gs, p_cutoff = 0.01, q_cutoff = 0.01)
+# next we only show ten sample terms 
+ego3 <- ego3[1:10, ]
+head(ego3)
+```
+
+# Bar Plot
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bar")
+p2 <- plotEnrich(ego3, plot_type = "bar", term_metric = "GeneRatio", stats_metric = "pvalue")
+p3 <- plotEnrich(ego3, plot_type = "bar", up_color = "#E69056", down_color = "#325CAC")
+p4 <- plotEnrich(ego3, plot_type = "bar", wrap_length = 25)
+#p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+p1
+p2
+
+pdf(paste("BarPlot_citosol.pdf",sep=""))
+p1 
+dev.off()
+
+pdf(paste("BarPlot2_citosol.pdf",sep=""))
+p2
+dev.off()
+```
+
+#  Bubble Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bubble")
+p2 <- plotEnrich(ego3, plot_type = "bubble", 
+                 scale_ratio = 0.5, stats_metric = "qvalue")
+#p1 / p2 + plot_annotation(tag_levels = "A")
+p2
+
+pdf(paste("BubblePlot_citosol.pdf",sep=""))
+p2
+dev.off()
+```
+
+#  Dot Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "dot")
+p2 <- plotEnrich(ego3,
+  plot_type = "dot",
+  scale_ratio = 0.5,
+  stats_metric = "pvalue",
+  term_metric = "RichFactor"
+)
+#p1 + p2 + plot_annotation(tag_levels = "A")
+p1
+p2
+pdf(paste("DOTPlot_citosol.pdf",sep=""))
+p1 
+dev.off()
+pdf(paste("DOTPlot2_citosol.pdf",sep=""))
+p2 
+dev.off()
+```
+
+```{r}
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 10,
+           legend_text_size =8,
+           n_term = 6) # show terms
+
+
+pdf(paste("PlotEnrich_citosol.pdf",sep=""))
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 10,
+           legend_text_size =8,
+           n_term = 6) # show terms
+dev.off()
+```
+
+#  Lollipop Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "lollipop")
+p2 <- plotEnrich(ego3,
+  plot_type = "lollipop",
+  scale_ratio = .2,
+  stats_metric = "pvalue",
+  term_metric = "RichFactor",
+  up_color = "#a32a31",
+  down_color = "#f7dcca"
+)
+#p1 + p2 + plot_annotation(tag_levels = "A")
+p1
+p2
+
+pdf(paste("Lollipop_citosol.pdf",sep=""))
+p1
+dev.off()
+
+pdf(paste("Lollipop2_citosol.pdf",sep=""))
+p2
+dev.off()
+```
+
+
+#  Heatmap Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "geneheat")
+show_gene = c('MALAT1','ABCC2','ABCC2','ABCC2')
+p2 <- plotEnrich(ego3, plot_type = "geneheat", show_gene = show_gene)
+p3 <- plotEnrich(ego3, plot_type = "geneheat", show_gene = show_gene)
+#p1 / p2 / p3 + plot_annotation(tag_levels = "A")
+p1
+pdf(paste("Heatmapplot_citosol.pdf",sep=""))
+p1  
+dev.off()
+```
+
+# Wordcloud Plot
+```{r}
+plotEnrich(ego3, plot_type = "wordcloud")
+
+pdf(paste("Wordcloudplot_citosol.pdf",sep=""))
+plotEnrich(ego3, plot_type = "wordcloud")
+dev.off()
+```
+
+
+# Upset Plot
+
+```{r}
+pdf(paste("Upsetplot_citosol.pdf",sep=""))
+plotEnrich(ego3, plot_type = "upset",main_text_size = 15,legend_text_size = 8)
+dev.off()
+
+plotEnrich(ego3, plot_type = "upset",main_text_size = 15,legend_text_size = 8)
+```
+
+#  GO-specific: Terms Tangram Plot
+```{r}
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+#“bar”, “wego”, “dot”, “bubble”, “lollipop”, “geneheat”, “genechord”, “network”, “gomap”, “goheat”, “gotangram”, “wordcloud”, “upset”
+
+pdf(paste("gotangram_citosol.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+dev.off()
+```
+
+
+
+# Network Plot
+
+```{r}
+library(patchwork)
+library(igraph)
+library(ggraph)
+p1 <- plotEnrich(ego3, plot_type = "network", scale_ratio = 0.5)
+p2 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "circle", scale_ratio = 0.5)
+p3 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "grid", sim_method = "Wang",
+                 up_color = "#a32a31", down_color = "#f7dcca",
+                 scale_ratio = 0.5)
+#(p1 + p2) / p3 + plot_annotation(tag_levels = "A")
+p3
+
+
+pdf(paste("Network_citosol.pdf",sep=""))
+p3 
+dev.off()
+```
+
+
+
+#  GO-specific: WEGO Plot
+
+```{r}
+# 1st step: prepare input IDs
+id<- selectedEntrezsUP
+
+# 2nd step: prepare CC and MF gene sets
+go_cc <- geneset::getGO(org = "human",ont = "cc")
+go_mf <- geneset::getGO(org = "human",ont = "mf")
+go_bp <- geneset::getGO(org = "human",ont = "bp")
+
+# 3rd step: analysis
+ego_cc <- genORA(id, geneset = go_cc)
+ego_mf <- genORA(id, geneset = go_mf)
+ego_bp <- genORA(id, geneset = go_bp)
+
+# 4th step: merge two data frames
+# Note: each data frame should add new column "Ontology"
+ego_cc <- ego_cc %>% dplyr::mutate(Ontology = "cc") %>% dplyr::rename(ID = 1)
+ego_mf <- ego_mf %>% dplyr::mutate(Ontology = "mf") %>% dplyr::rename(ID = 1)
+ego_bp <- ego_bp %>% dplyr::mutate(Ontology = "bp") %>% dplyr::rename(ID = 1)
+
+all_ego <- rbind(ego_cc,ego_mf,ego_bp)
+all_ego<-ego_bp
+```
+
+
+```{r }
+plotEnrich(all_ego, plot_type = "wego", n_term = 5, scale_ratio = 0.4)+ theme(axis.text.x = element_text(size = 18))
+
+pdf(paste("WEGOPlot_citosol.pdf",sep=""))
+plotEnrich(all_ego, plot_type = "wego", n_term = 5, scale_ratio = 0.4)+ theme(axis.text.x = element_text(size = 18))
+dev.off()
+```
+
+# GO-specific: Map Plot
+
+```{r}
+library(igraph)
+library(ggraph)
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+
+pdf(paste("MapPlot_citosol.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+dev.off()
+```
+
+# GO-specific: Terms Heatmap Plot
+
+```{r}
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+
+pdf(paste("TermsHeatmap_citosol.pdf",sep=""))
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+dev.off()
+```
+
+
+# Plot Theme
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "dot")
+p2 <- plotEnrich(ego3,
+  plot_type = "dot",
+  main_text_size = 10,
+  legend_text_size = 10
+)
+
+p3 <- plotEnrich(ego3,
+  plot_type = "dot",
+  border_thick = 3,
+  remove_grid = F
+)
+
+p4 <- plotEnrich(ego3,
+  plot_type = "dot",
+  remove_main_text = T,
+  remove_legend_text = T,
+  remove_legend = T
+)
+#p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+p1
+
+pdf(paste("PlotTheme_citosol.pdf",sep=""))
+p1 
+dev.off()
+```
+##### DOWN-REGULATED ################################################################################################################################################################################################################################################################################
+
+```{r}
+allEntrezs <- rownames(matrix_obj_C41_SC)
+rownames(markers41)<-markers41$X
+#selectedEntrezsUP <- markers41$X
+
+markersUP <- markers41 %>% filter(avg_diff>0)
+markersDOWN <- markers41 %>% filter(avg_diff<0)
+#selectedEntrezsUP <- markersUP$X
+selectedEntrezsUP <- markersDOWN$X
+length(allEntrezs); length(selectedEntrezsUP)
+
+library(clusterProfiler)
+library(org.Mm.eg.db)
+ego <- enrichGO(gene = selectedEntrezsUP, 
+                universe = allEntrezs,
+                keyType = "SYMBOL",
+                OrgDb = org.Hs.eg.db, 
+                ont = "BP", 
+                pAdjustMethod = "BH", 
+                qvalueCutoff = 0.01, 
+                readable = TRUE)
+
+```
+
+```{r, warning=FALSE}
+head(ego)
+ego_results <- data.frame(ego)
+write.csv(ego_results, "clusterProfiler_ORAresults_DownGO.csv")
+```
+
+
+```{r, warning=FALSE}
+dotplot(ego, showCategory=10)
+pdf(paste("dotplot_nucli.pdf",sep=""))
+dotplot(ego, showCategory=10)
+dev.off()
+```
+
+```{r, warning=FALSE}
+pdf(paste("GO_nucli.pdf",sep=""))
+goplot(ego, showCategory=5, cex=0.5)
+dev.off()
+
+goplot(ego, showCategory=5, cex=0.5)
+```
+
+```{r, warning=FALSE}
+## Gene network para los términos seleccionados
+pdf(paste("cneplot_nucli.pdf",sep=""))
+cnetplot(ego) 
+dev.off()
+
+cnetplot(ego) 
+```
+
+
+```{r, warning=FALSE}
+ego2 = clusterProfiler::simplify(ego, cutoff = 0.01, by = "p.adjust")
+png("./cnetplot_transp_nucli.png", units = "in", width = 24, height = 16, res = 600,
+    bg = "transparent")
+par(bg = NA)
+a <- cnetplot(ego2, showCategory = 5, cex_category = 1, cex_label_category = 2.5,
+    cex_gene = 1, cex_label_gene = 1, circular = FALSE, colorEdge = TRUE)
+a
+invisible(dev.off())
+a
+```
+
+
+
+
+
+```{r, warning=FALSE}
+## Enrichment Map
+library(enrichplot)
+ego_sim <- pairwise_termsim(ego)
+pdf(paste("emaplot_nucli.pdf",sep=""))
+emapplot(ego_sim, cex_label_category=0.6)
+dev.off()
+
+emapplot(ego_sim, cex_label_category=0.6)
+```
+
+```{r, warning=FALSE, fig.width=15, fig.height=15}
+term_similarity_matrix = pairwise_termsim(ego)
+emapplot(term_similarity_matrix, showCategory = 15, group_category = TRUE, group_legend = TRUE)
+
+pdf(paste("emaplot_grouped_nucli.pdf",sep=""),width = 10, height = 10)
+emapplot(term_similarity_matrix, showCategory = 15, group_category = TRUE, group_legend = TRUE)
+dev.off()
+```
+
+```{r, warning=FALSE}
+library(enrichplot)
+
+pdf(paste("heatplot_ego_nucli.pdf",sep=""),width = 9, height = 10)
+heatplot(ego)
+dev.off()
+heatplot(ego)
+```
+
+
+```{r}
+library(geneset)
+library(genekitr)
+
+hg_gs <- geneset::getGO(org = "human",ont = "bp")
+
+# ORA analysis
+ego3 <- genORA(selectedEntrezsUP, geneset = hg_gs, p_cutoff = 0.01, q_cutoff = 0.01)
+# next we only show ten sample terms 
+ego3 <- ego3[1:10, ]
+head(ego3)
+```
+
+# Bar Plot
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bar")
+p2 <- plotEnrich(ego3, plot_type = "bar", term_metric = "GeneRatio", stats_metric = "pvalue")
+p3 <- plotEnrich(ego3, plot_type = "bar", up_color = "#E69056", down_color = "#325CAC")
+p4 <- plotEnrich(ego3, plot_type = "bar", wrap_length = 25)
+#p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+p1
+p2
+
+pdf(paste("BarPlot_nucli.pdf",sep=""))
+p1 
+dev.off()
+
+pdf(paste("BarPlot2_nucli.pdf",sep=""))
+p2
+dev.off()
+```
+
+#  Bubble Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "bubble")
+p2 <- plotEnrich(ego3, plot_type = "bubble", 
+                 scale_ratio = 0.5, stats_metric = "qvalue")
+#p1 / p2 + plot_annotation(tag_levels = "A")
+p2
+
+pdf(paste("BubblePlot_nucli.pdf",sep=""))
+p2
+dev.off()
+```
+
+#  Dot Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "dot")
+p2 <- plotEnrich(ego3,
+  plot_type = "dot",
+  scale_ratio = 0.5,
+  stats_metric = "pvalue",
+  term_metric = "RichFactor"
+)
+#p1 + p2 + plot_annotation(tag_levels = "A")
+p1
+p2
+pdf(paste("DOTPlot_nucli.pdf",sep=""))
+p1 
+dev.off()
+pdf(paste("DOTPlot2_nucli.pdf",sep=""))
+p2 
+dev.off()
+```
+
+```{r}
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 10,
+           legend_text_size =8,
+           n_term = 6) # show terms
+
+
+pdf(paste("PlotEnrich_nucli.pdf",sep=""))
+plotEnrich(ego3,
+           plot_type = 'dot',
+           scale_ratio = 0.5, # dot size
+           main_text_size = 10,
+           legend_text_size =8,
+           n_term = 6) # show terms
+dev.off()
+```
+
+#  Lollipop Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "lollipop")
+p2 <- plotEnrich(ego3,
+  plot_type = "lollipop",
+  scale_ratio = .2,
+  stats_metric = "pvalue",
+  term_metric = "RichFactor",
+  up_color = "#a32a31",
+  down_color = "#f7dcca"
+)
+#p1 + p2 + plot_annotation(tag_levels = "A")
+p1
+p2
+
+pdf(paste("Lollipo_nucli.pdf",sep=""))
+p1
+dev.off()
+
+pdf(paste("Lollipop2_citosol.pdf",sep=""))
+p2
+dev.off()
+```
+
+
+#  Heatmap Plot
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "geneheat")
+show_gene = c('MALAT1','ABCC2','ABCC2','ABCC2')
+p2 <- plotEnrich(ego3, plot_type = "geneheat", show_gene = show_gene)
+p3 <- plotEnrich(ego3, plot_type = "geneheat", show_gene = show_gene)
+#p1 / p2 / p3 + plot_annotation(tag_levels = "A")
+p1
+pdf(paste("Heatmapplot_nucli.pdf",sep=""))
+p1  
+dev.off()
+```
+
+# Wordcloud Plot
+```{r}
+plotEnrich(ego3, plot_type = "wordcloud")
+
+pdf(paste("Wordcloudplot_nucli.pdf",sep=""))
+plotEnrich(ego3, plot_type = "wordcloud")
+dev.off()
+```
+
+
+# Upset Plot
+
+```{r}
+pdf(paste("Upsetplot_nucli.pdf",sep=""))
+plotEnrich(ego3, plot_type = "upset",main_text_size = 15,legend_text_size = 8)
+dev.off()
+
+plotEnrich(ego3, plot_type = "upset",main_text_size = 15,legend_text_size = 8)
+```
+
+#  GO-specific: Terms Tangram Plot
+```{r}
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+#“bar”, “wego”, “dot”, “bubble”, “lollipop”, “geneheat”, “genechord”, “network”, “gomap”, “goheat”, “gotangram”, “wordcloud”, “upset”
+
+pdf(paste("gotangram_nucli.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gotangram",main_text_size = 15,legend_text_size = 8, scale_ratio = 0.5, sim_method = "Rel")
+dev.off()
+```
+
+
+
+# Network Plot
+
+```{r}
+library(patchwork)
+library(igraph)
+library(ggraph)
+p1 <- plotEnrich(ego3, plot_type = "network", scale_ratio = 0.5)
+p2 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "circle", scale_ratio = 0.5)
+p3 <- plotEnrich(ego3, plot_type = "network", 
+                 layout = "grid", sim_method = "Wang",
+                 up_color = "#a32a31", down_color = "#f7dcca",
+                 scale_ratio = 0.5)
+#(p1 + p2) / p3 + plot_annotation(tag_levels = "A")
+p3
+
+
+pdf(paste("Network_nucli.pdf",sep=""))
+p3 
+dev.off()
+```
+
+
+
+#  GO-specific: WEGO Plot
+
+```{r}
+# 1st step: prepare input IDs
+id<- selectedEntrezsUP
+
+# 2nd step: prepare CC and MF gene sets
+go_cc <- geneset::getGO(org = "human",ont = "cc")
+go_mf <- geneset::getGO(org = "human",ont = "mf")
+go_bp <- geneset::getGO(org = "human",ont = "bp")
+
+# 3rd step: analysis
+ego_cc <- genORA(id, geneset = go_cc)
+ego_mf <- genORA(id, geneset = go_mf)
+ego_bp <- genORA(id, geneset = go_bp)
+
+# 4th step: merge two data frames
+# Note: each data frame should add new column "Ontology"
+ego_cc <- ego_cc %>% dplyr::mutate(Ontology = "cc") %>% dplyr::rename(ID = 1)
+ego_mf <- ego_mf %>% dplyr::mutate(Ontology = "mf") %>% dplyr::rename(ID = 1)
+ego_bp <- ego_bp %>% dplyr::mutate(Ontology = "bp") %>% dplyr::rename(ID = 1)
+
+all_ego <- rbind(ego_cc,ego_mf,ego_bp)
+all_ego<-ego_bp
+```
+
+
+```{r }
+plotEnrich(all_ego, plot_type = "wego", n_term = 5, scale_ratio = 0.4)+ theme(axis.text.x = element_text(size = 18))
+
+pdf(paste("WEGOPlot_nucli.pdf",sep=""))
+plotEnrich(all_ego, plot_type = "wego", n_term = 5, scale_ratio = 0.4)+ theme(axis.text.x = element_text(size = 18))
+dev.off()
+```
+
+# GO-specific: Map Plot
+
+```{r}
+library(igraph)
+library(ggraph)
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+
+pdf(paste("MapPlot_nucli.pdf",sep=""))
+plotEnrich(ego3, plot_type = "gomap", wrap_length = 25,
+           up_color = '#a32a31',down_color = '#3665a6')
+dev.off()
+```
+
+# GO-specific: Terms Heatmap Plot
+
+```{r}
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+
+pdf(paste("TermsHeatmap_nucli.pdf",sep=""))
+plotEnrich(ego3, plot_type = "goheat", sim_method = "Rel")
+dev.off()
+```
+
+
+# Plot Theme
+
+```{r}
+library(patchwork)
+p1 <- plotEnrich(ego3, plot_type = "dot")
+p2 <- plotEnrich(ego3,
+  plot_type = "dot",
+  main_text_size = 10,
+  legend_text_size = 10
+)
+
+p3 <- plotEnrich(ego3,
+  plot_type = "dot",
+  border_thick = 3,
+  remove_grid = F
+)
+
+p4 <- plotEnrich(ego3,
+  plot_type = "dot",
+  remove_main_text = T,
+  remove_legend_text = T,
+  remove_legend = T
+)
+#p1 + p2 + p3 + p4 + plot_annotation(tag_levels = "A")
+p1
+
+pdf(paste("PlotTheme_nucli.pdf",sep=""))
+p1 
+dev.off()
+```
